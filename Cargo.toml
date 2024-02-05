@@ -1,0 +1,15 @@
+[package]
+name = "frnsc-prefetch"
+version = "0.8.0"
+authors = ["Samuel Garcés Marín <samuel.garces@protonmail.com>"]
+keywords = ["forensic", "windows", "prefetch", "registry", "cybersecurity"]
+categories = ["parsing"]
+description = "Pure rust windows prefetch parser implementation"
+license = "MIT"
+edition = "2021"
+repository = "https://github.com/ForensicRS/frnsc-prefetch"
+exclude = ["/artifacts", "/img"]
+
+[dependencies]
+crc32fast = "1.3.2"
+forensic-rs = "0.8.0"
