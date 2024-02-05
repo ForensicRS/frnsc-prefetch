@@ -1,8 +1,7 @@
 use forensic_rs::prelude::ForensicResult;
 
-pub mod xpress_huff;
 pub mod lz77;
-
+pub mod xpress_huff;
 
 #[repr(u32)]
 #[derive(Debug, Clone)]
@@ -26,17 +25,25 @@ impl From<u32> for CompressionAlgorithm {
     }
 }
 
-pub fn decompress(in_buf: &[u8], out_buf: &mut Vec<u8>, algorithm : CompressionAlgorithm) -> ForensicResult<()> {
+pub fn decompress(
+    in_buf: &[u8],
+    out_buf: &mut Vec<u8>,
+    algorithm: CompressionAlgorithm,
+) -> ForensicResult<()> {
     match algorithm {
         CompressionAlgorithm::CompressionFormatNone => {
             out_buf.copy_from_slice(in_buf);
-        },
+        }
         CompressionAlgorithm::CompressionFormatDefault => {
-            return Err(forensic_rs::err::ForensicError::Other(format!("Default compression algorithm not supported")))
-        },
+            return Err(forensic_rs::err::ForensicError::Other(
+                "Default compression algorithm not supported".into(),
+            ))
+        }
         CompressionAlgorithm::CompressionFormatLznt1 => lz77::decompress(in_buf, out_buf)?,
-        CompressionAlgorithm::CompressionFormatXpress => xpress_huff::decompress(in_buf, out_buf)?,// Can't happen
-        CompressionAlgorithm::CompressionFormatXpressHuff => xpress_huff::decompress(in_buf, out_buf)?
+        CompressionAlgorithm::CompressionFormatXpress => xpress_huff::decompress(in_buf, out_buf)?, // Can't happen
+        CompressionAlgorithm::CompressionFormatXpressHuff => {
+            xpress_huff::decompress(in_buf, out_buf)?
+        }
     }
     Ok(())
 }

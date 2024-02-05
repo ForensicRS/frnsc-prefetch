@@ -70,7 +70,7 @@ fn decompress_chunk(
             length += 3;
             loop {
                 if (i as i32 + offset) < 0 {
-                    return Err(ForensicError::bad_format_str("decompress_expres_huff(): Invalid offset position when decompressing a chunk"))
+                    return Err(ForensicError::bad_format_str("decompress_expres_huff(): Invalid offset position when decompressing a chunk"));
                 }
                 let position = (i as i32 + offset) as usize;
                 out_buf.push(out_buf[position]);
@@ -105,7 +105,7 @@ impl<'a> BitStream<'a> {
             source,
             index: in_pos + 4,
             bits: 32,
-            mask: mask as u32,
+            mask,
         }
     }
 
@@ -171,14 +171,18 @@ impl PartialEq for PrefixCodeSymbol {
 impl Eq for PrefixCodeSymbol {}
 
 fn prefix_code_tree_add_leaf(
-    tree_nodes: &Vec<Rc<RefCell<PrefixCodeNode>>>,
+    tree_nodes: &[Rc<RefCell<PrefixCodeNode>>],
     leaf_index: usize,
     mask: u32,
     bits: u32,
 ) -> ForensicResult<u32> {
-    let mut node = match tree_nodes.get(0) {
+    let mut node = match tree_nodes.first() {
         Some(v) => v.clone(),
-        None => return Err(ForensicError::bad_format_str("decompress_expres_huff(): Invalid PreficCode"))
+        None => {
+            return Err(ForensicError::bad_format_str(
+                "decompress_expres_huff(): Invalid PreficCode",
+            ))
+        }
     };
     let mut i = leaf_index + 1;
     let mut child_index;
@@ -204,13 +208,10 @@ fn prefix_code_tree_add_leaf(
 
 fn prefix_code_tree_rebuild(input: &[u8]) -> ForensicResult<Rc<RefCell<PrefixCodeNode>>> {
     let mut tree_nodes: Vec<Rc<RefCell<PrefixCodeNode>>> = (0..1024)
-        .into_iter()
         .map(|_| Rc::new(RefCell::new(PrefixCodeNode::default())))
         .collect();
-    let mut symbol_info: Vec<PrefixCodeSymbol> = (0..512)
-        .into_iter()
-        .map(|_| PrefixCodeSymbol::default())
-        .collect();
+    let mut symbol_info: Vec<PrefixCodeSymbol> =
+        (0..512).map(|_| PrefixCodeSymbol::default()).collect();
     for i in 0..256 {
         let mut value = input[i] as usize;
 
@@ -230,7 +231,7 @@ fn prefix_code_tree_rebuild(input: &[u8]) -> ForensicResult<Rc<RefCell<PrefixCod
         if a.symbol < b.symbol {
             return Ordering::Less;
         }
-        return Ordering::Equal;
+        Ordering::Equal
     });
     let mut i = 0;
     while i < 512 && symbol_info[i].length == 0 {
@@ -240,15 +241,15 @@ fn prefix_code_tree_rebuild(input: &[u8]) -> ForensicResult<Rc<RefCell<PrefixCod
     let mut bits = 1;
 
     let mut j = 1;
-    for i in i..512 {
+    for symbol in symbol_info.iter().take(512).skip(i) {
         let mut tree_node_j = tree_nodes[j].borrow_mut();
         tree_node_j.id = j as u32;
-        tree_node_j.symbol = symbol_info[i].symbol;
+        tree_node_j.symbol = symbol.symbol;
         tree_node_j.leaf = true;
         drop(tree_node_j);
 
-        mask = mask << (symbol_info[i].length - bits);
-        bits = symbol_info[i].length;
+        mask <<= symbol.length - bits;
+        bits = symbol.length;
         j = prefix_code_tree_add_leaf(&tree_nodes, j, mask, bits)? as usize;
         mask += 1;
     }
