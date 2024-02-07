@@ -88,8 +88,14 @@ fn should_parse_prefetch_v30_cmd() {
             "./artifacts/30/C/Windows/Prefetch/CMD.EXE-6D6290C5.pf",
         ))
         .unwrap();
-    let _pref = read_prefetch_file_compressed("CMD.EXE-6D6290C5.pf", file).unwrap();
+    let pref = read_prefetch_file_compressed("CMD.EXE-6D6290C5.pf", file).unwrap();
     //println!("{:?}", pref);
+    assert_eq!(4, pref.run_count);
+    assert_eq!(4, pref.last_run_times.len());
+    assert_eq!(133515874611440142, pref.last_run_times[0]); // 5 February 2024 6:17:41
+    assert_eq!(133515874591645855, pref.last_run_times[1]); // 5 February 2024 6:17:39
+    assert_eq!(133515561632524658, pref.last_run_times[2]); // 4 February 2024 21:36:03
+    assert_eq!(133514937170602624, pref.last_run_times[3]); // 4 February 2024 4:15:17
 }
 
 #[test]

@@ -53,7 +53,7 @@ pub fn metrics_array_17(
     info: &PrefetchFileInformation,
 ) -> ForensicResult<Vec<Metric>> {
     let end_string_pos = (info.filename_string_offset + info.filename_string_size) as usize;
-    if end_string_pos > file_buffer.len() || info.metrics_offsets as usize > file_buffer.len() {
+    if end_string_pos > file_buffer.len() || (info.metrics_offsets + info.metrics_count * 20) as usize > file_buffer.len() {
         return Err(ForensicError::bad_format_str(
             "The metrics array position is greater than the file buffer",
         ));

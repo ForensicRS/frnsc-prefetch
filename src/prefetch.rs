@@ -241,69 +241,38 @@ fn process_prefetch_data(artifact_name: &str, buffer: &[u8]) -> ForensicResult<P
 }
 
 fn file_information_17(buffer: &[u8]) -> ForensicResult<PrefetchFileInformation> {
-    let metrics_offsets = u32_at_pos(buffer, 0);
-    let metrics_count = u32_at_pos(buffer, 4);
-    let trace_chain_offset = u32_at_pos(buffer, 8);
-    let trace_chain_count = u32_at_pos(buffer, 12);
-    let filename_string_offset = u32_at_pos(buffer, 16);
-    let filename_string_size = u32_at_pos(buffer, 20);
-    let volume_information_offset = u32_at_pos(buffer, 24);
-    let volume_count = u32_at_pos(buffer, 28);
-    let volume_information_size = u32_at_pos(buffer, 32);
-    let last_run_time = u64_at_pos(buffer, 36);
-    let run_count = u32_at_pos(buffer, 60);
     Ok(PrefetchFileInformation {
-        metrics_offsets,
-        metrics_count,
-        trace_chain_offset,
-        trace_chain_count,
-        filename_string_offset,
-        filename_string_size,
-        volume_information_offset,
-        volume_information_size,
-        volume_count,
-        last_run_times: vec![last_run_time],
-        run_count,
+        metrics_offsets: u32_at_pos(buffer, 0),
+        metrics_count: u32_at_pos(buffer, 4),
+        trace_chain_offset: u32_at_pos(buffer, 8),
+        trace_chain_count: u32_at_pos(buffer, 12),
+        filename_string_offset: u32_at_pos(buffer, 16),
+        filename_string_size: u32_at_pos(buffer, 20),
+        volume_information_offset: u32_at_pos(buffer, 24),
+        volume_count: u32_at_pos(buffer, 28),
+        volume_information_size: u32_at_pos(buffer, 32),
+        last_run_times: vec![u64_at_pos(buffer, 36)],
+        run_count: u32_at_pos(buffer, 60),
     })
 }
 
 fn file_information_23(buffer: &[u8]) -> ForensicResult<PrefetchFileInformation> {
-    let metrics_offsets = u32_at_pos(buffer, 0);
-    let metrics_count = u32_at_pos(buffer, 4);
-    let trace_chain_offset = u32_at_pos(buffer, 8);
-    let trace_chain_count = u32_at_pos(buffer, 12);
-    let filename_string_offset = u32_at_pos(buffer, 16);
-    let filename_string_size = u32_at_pos(buffer, 20);
-    let volume_information_offset = u32_at_pos(buffer, 24);
-    let volume_count = u32_at_pos(buffer, 28);
-    let volume_information_size = u32_at_pos(buffer, 32);
-    let last_run_time = u64_at_pos(buffer, 44);
-    let run_count = u32_at_pos(buffer, 68);
     Ok(PrefetchFileInformation {
-        metrics_offsets,
-        metrics_count,
-        trace_chain_offset,
-        trace_chain_count,
-        filename_string_offset,
-        filename_string_size,
-        volume_information_offset,
-        volume_information_size,
-        volume_count,
-        last_run_times: vec![last_run_time],
-        run_count,
+        metrics_offsets: u32_at_pos(buffer, 0),
+        metrics_count: u32_at_pos(buffer, 4),
+        trace_chain_offset: u32_at_pos(buffer, 8),
+        trace_chain_count: u32_at_pos(buffer, 12),
+        filename_string_offset: u32_at_pos(buffer, 16),
+        filename_string_size: u32_at_pos(buffer, 20),
+        volume_information_offset: u32_at_pos(buffer, 24),
+        volume_count: u32_at_pos(buffer, 28),
+        volume_information_size: u32_at_pos(buffer, 32),
+        last_run_times: vec![u64_at_pos(buffer, 44)],
+        run_count: u32_at_pos(buffer, 68),
     })
 }
 
 fn file_information_26(buffer: &[u8]) -> ForensicResult<PrefetchFileInformation> {
-    let metrics_offsets = u32_at_pos(buffer, 0);
-    let metrics_count = u32_at_pos(buffer, 4);
-    let trace_chain_offset = u32_at_pos(buffer, 8);
-    let trace_chain_count = u32_at_pos(buffer, 12);
-    let filename_string_offset = u32_at_pos(buffer, 16);
-    let filename_string_size = u32_at_pos(buffer, 20);
-    let volume_information_offset = u32_at_pos(buffer, 24);
-    let volume_count = u32_at_pos(buffer, 28);
-    let volume_information_size = u32_at_pos(buffer, 32);
     let mut last_run_times = Vec::with_capacity(8);
     for i in (44..108).step_by(8) {
         let run_time = u64_at_pos(buffer, i);
@@ -312,32 +281,22 @@ fn file_information_26(buffer: &[u8]) -> ForensicResult<PrefetchFileInformation>
         }
         last_run_times.push(run_time);
     }
-    let run_count = u32_at_pos(buffer, 124);
     Ok(PrefetchFileInformation {
-        metrics_offsets,
-        metrics_count,
-        trace_chain_offset,
-        trace_chain_count,
-        filename_string_offset,
-        filename_string_size,
-        volume_information_offset,
-        volume_information_size,
-        volume_count,
+        metrics_offsets: u32_at_pos(buffer, 0),
+        metrics_count: u32_at_pos(buffer, 4),
+        trace_chain_offset: u32_at_pos(buffer, 8),
+        trace_chain_count: u32_at_pos(buffer, 12),
+        filename_string_offset: u32_at_pos(buffer, 16),
+        filename_string_size: u32_at_pos(buffer, 20),
+        volume_information_offset: u32_at_pos(buffer, 24),
+        volume_count: u32_at_pos(buffer, 28),
+        volume_information_size: u32_at_pos(buffer, 32),
         last_run_times,
-        run_count,
+        run_count: u32_at_pos(buffer, 124),
     })
 }
 
 fn file_information_30v1(buffer: &[u8]) -> ForensicResult<PrefetchFileInformation> {
-    let metrics_offsets = u32_at_pos(buffer, 0);
-    let metrics_count = u32_at_pos(buffer, 4);
-    let trace_chain_offset = u32_at_pos(buffer, 8);
-    let trace_chain_count = u32_at_pos(buffer, 12);
-    let filename_string_offset = u32_at_pos(buffer, 16);
-    let filename_string_size = u32_at_pos(buffer, 20);
-    let volume_information_offset = u32_at_pos(buffer, 24);
-    let volume_count = u32_at_pos(buffer, 28);
-    let volume_information_size = u32_at_pos(buffer, 32);
     let mut last_run_times = Vec::with_capacity(8);
     for i in (44..108).step_by(8) {
         let run_time = u64_at_pos(buffer, i);
@@ -346,32 +305,22 @@ fn file_information_30v1(buffer: &[u8]) -> ForensicResult<PrefetchFileInformatio
         }
         last_run_times.push(run_time);
     }
-    let run_count = u32_at_pos(buffer, 124);
     Ok(PrefetchFileInformation {
-        metrics_offsets,
-        metrics_count,
-        trace_chain_offset,
-        trace_chain_count,
-        filename_string_offset,
-        filename_string_size,
-        volume_information_offset,
-        volume_information_size,
-        volume_count,
+        metrics_offsets: u32_at_pos(buffer, 0),
+        metrics_count: u32_at_pos(buffer, 4),
+        trace_chain_offset: u32_at_pos(buffer, 8),
+        trace_chain_count: u32_at_pos(buffer, 12),
+        filename_string_offset: u32_at_pos(buffer, 16),
+        filename_string_size: u32_at_pos(buffer, 20),
+        volume_information_offset: u32_at_pos(buffer, 24),
+        volume_count: u32_at_pos(buffer, 28),
+        volume_information_size: u32_at_pos(buffer, 32),
         last_run_times,
-        run_count,
+        run_count: u32_at_pos(buffer, 124),
     })
 }
 
 fn file_information_30v2(buffer: &[u8]) -> ForensicResult<PrefetchFileInformation> {
-    let metrics_offsets = u32_at_pos(buffer, 0);
-    let metrics_count = u32_at_pos(buffer, 4);
-    let trace_chain_offset = u32_at_pos(buffer, 8);
-    let trace_chain_count = u32_at_pos(buffer, 12);
-    let filename_string_offset = u32_at_pos(buffer, 16);
-    let filename_string_size = u32_at_pos(buffer, 20);
-    let volume_information_offset = u32_at_pos(buffer, 24);
-    let volume_count = u32_at_pos(buffer, 28);
-    let volume_information_size = u32_at_pos(buffer, 32);
     let mut last_run_times = Vec::with_capacity(8);
     for i in (44..108).step_by(8) {
         let run_time = u64_at_pos(buffer, i);
@@ -380,19 +329,18 @@ fn file_information_30v2(buffer: &[u8]) -> ForensicResult<PrefetchFileInformatio
         }
         last_run_times.push(run_time);
     }
-    let run_count = u32_at_pos(buffer, 116);
     Ok(PrefetchFileInformation {
-        metrics_offsets,
-        metrics_count,
-        trace_chain_offset,
-        trace_chain_count,
-        filename_string_offset,
-        filename_string_size,
-        volume_information_offset,
-        volume_information_size,
-        volume_count,
+        metrics_offsets: u32_at_pos(buffer, 0),
+        metrics_count: u32_at_pos(buffer, 4),
+        trace_chain_offset: u32_at_pos(buffer, 8),
+        trace_chain_count: u32_at_pos(buffer, 12),
+        filename_string_offset: u32_at_pos(buffer, 16),
+        filename_string_size: u32_at_pos(buffer, 20),
+        volume_information_offset: u32_at_pos(buffer, 24),
+        volume_count: u32_at_pos(buffer, 28),
+        volume_information_size: u32_at_pos(buffer, 32),
         last_run_times,
-        run_count,
+        run_count: u32_at_pos(buffer, 116),
     })
 }
 
