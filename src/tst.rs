@@ -1,9 +1,9 @@
-use std::path::Path;
-
 use forensic_rs::{
     core::fs::{ChRootFileSystem, StdVirtualFS},
-    traits::vfs::VirtualFileSystem,
+    traits::{forensic::{IntoActivity, IntoTimeline}, vfs::VirtualFileSystem},
+    utils::time::Filetime,
 };
+use std::path::Path;
 
 use crate::prefetch::{
     read_prefetch_file_compressed, read_prefetch_file_no_compressed, read_prefetch_form_fs,
@@ -77,7 +77,12 @@ fn should_parse_prefetch_v30_powershell() {
         ))
         .unwrap();
     let pref = read_prefetch_file_compressed("POWERSHELL.EXE-AE8EDC9B.pf", file).unwrap();
-    println!("{:?}", pref);
+    let mut forensic_data = pref.timeline();
+    let event = forensic_data.next().unwrap();
+    println!("{:?}", event);
+    let mut forensic_data = pref.activity();
+    let activity = forensic_data.next().unwrap();
+    println!("Activity: {:?}", activity);
 }
 
 #[test]
@@ -92,10 +97,10 @@ fn should_parse_prefetch_v30_cmd() {
     //println!("{:?}", pref);
     assert_eq!(4, pref.run_count);
     assert_eq!(4, pref.last_run_times.len());
-    assert_eq!(133515874611440142, pref.last_run_times[0]); // 5 February 2024 6:17:41
-    assert_eq!(133515874591645855, pref.last_run_times[1]); // 5 February 2024 6:17:39
-    assert_eq!(133515561632524658, pref.last_run_times[2]); // 4 February 2024 21:36:03
-    assert_eq!(133514937170602624, pref.last_run_times[3]); // 4 February 2024 4:15:17
+    assert_eq!(Filetime::new(133515874611440142), pref.last_run_times[0]); // 5 February 2024 6:17:41
+    assert_eq!(Filetime::new(133515874591645855), pref.last_run_times[1]); // 5 February 2024 6:17:39
+    assert_eq!(Filetime::new(133515561632524658), pref.last_run_times[2]); // 4 February 2024 21:36:03
+    assert_eq!(Filetime::new(133514937170602624), pref.last_run_times[3]); // 4 February 2024 4:15:17
 }
 
 #[test]

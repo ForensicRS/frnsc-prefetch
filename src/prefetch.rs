@@ -1,10 +1,7 @@
 use std::{io::Read, path::Path};
 
 use forensic_rs::{
-    err::{ForensicError, ForensicResult},
-    notifications::NotificationType,
-    notify_high, notify_low,
-    traits::vfs::{VDirEntry, VirtualFile, VirtualFileSystem},
+    artifact::WindowsArtifacts, err::{ForensicError, ForensicResult}, notifications::NotificationType, notify_high, notify_low, traits::vfs::{VDirEntry, VirtualFile, VirtualFileSystem}, utils::time::Filetime
 };
 
 use crate::{
@@ -28,6 +25,7 @@ const PREFETC_COMPRESS_SIGNATURE_U8: &[u8] = b"MAM";
 /// let _list = read_prefetch_form_fs(&mut fs).expect("Must read all prefetch from filesystem");
 /// ```
 pub fn read_prefetch_form_fs(fs: &mut impl VirtualFileSystem) -> ForensicResult<Vec<PrefetchFile>> {
+    forensic_rs::context::set_artifact(WindowsArtifacts::Prefetch);
     let prefetch_folder = Path::new(r"C:\Windows\Prefetch");
     let prefetch_files = match fs.read_dir(prefetch_folder) {
         Ok(v) => v,
@@ -251,7 +249,7 @@ fn file_information_17(buffer: &[u8]) -> ForensicResult<PrefetchFileInformation>
         volume_information_offset: u32_at_pos(buffer, 24),
         volume_count: u32_at_pos(buffer, 28),
         volume_information_size: u32_at_pos(buffer, 32),
-        last_run_times: vec![u64_at_pos(buffer, 36)],
+        last_run_times: vec![Filetime::new(u64_at_pos(buffer, 36))],
         run_count: u32_at_pos(buffer, 60),
     })
 }
@@ -267,7 +265,7 @@ fn file_information_23(buffer: &[u8]) -> ForensicResult<PrefetchFileInformation>
         volume_information_offset: u32_at_pos(buffer, 24),
         volume_count: u32_at_pos(buffer, 28),
         volume_information_size: u32_at_pos(buffer, 32),
-        last_run_times: vec![u64_at_pos(buffer, 44)],
+        last_run_times: vec![Filetime::new(u64_at_pos(buffer, 44))],
         run_count: u32_at_pos(buffer, 68),
     })
 }
@@ -279,7 +277,7 @@ fn file_information_26(buffer: &[u8]) -> ForensicResult<PrefetchFileInformation>
         if run_time == 0 {
             continue;
         }
-        last_run_times.push(run_time);
+        last_run_times.push(Filetime::new(run_time));
     }
     Ok(PrefetchFileInformation {
         metrics_offsets: u32_at_pos(buffer, 0),
@@ -303,7 +301,7 @@ fn file_information_30v1(buffer: &[u8]) -> ForensicResult<PrefetchFileInformatio
         if run_time == 0 {
             continue;
         }
-        last_run_times.push(run_time);
+        last_run_times.push(Filetime::new(run_time));
     }
     Ok(PrefetchFileInformation {
         metrics_offsets: u32_at_pos(buffer, 0),
@@ -327,7 +325,7 @@ fn file_information_30v2(buffer: &[u8]) -> ForensicResult<PrefetchFileInformatio
         if run_time == 0 {
             continue;
         }
-        last_run_times.push(run_time);
+        last_run_times.push(Filetime::new(run_time));
     }
     Ok(PrefetchFileInformation {
         metrics_offsets: u32_at_pos(buffer, 0),
