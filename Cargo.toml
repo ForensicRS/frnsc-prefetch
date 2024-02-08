@@ -1,6 +1,6 @@
 [package]
 name = "frnsc-prefetch"
-version = "0.9.0"
+version = "0.9.1"
 authors = ["Samuel Garcés Marín <samuel.garces@protonmail.com>"]
 keywords = ["forensic", "windows", "prefetch", "registry", "cybersecurity"]
 categories = ["parsing"]
@@ -12,5 +12,5 @@ exclude = ["/artifacts", "/img"]
 
 [dependencies]
 crc32fast = "1.3.2"
-forensic-rs = "0.9.0"
+forensic-rs = "0.9"
 #forensic-rs = {path = "../forensic-rs"}
