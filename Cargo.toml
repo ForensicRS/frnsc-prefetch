@@ -12,5 +12,5 @@ exclude = ["/artifacts", "/img"]
 
 [dependencies]
 crc32fast = "1.3.2"
-forensic-rs = ">=0.13"
+forensic-rs = "0.13"
 #forensic-rs = {path = "../forensic-rs"}
