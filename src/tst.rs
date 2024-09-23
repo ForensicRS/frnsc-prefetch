@@ -1,6 +1,9 @@
 use forensic_rs::{
     core::fs::{ChRootFileSystem, StdVirtualFS},
-    traits::{forensic::{IntoActivity, IntoTimeline}, vfs::VirtualFileSystem},
+    traits::{
+        forensic::{IntoActivity, IntoTimeline},
+        vfs::VirtualFileSystem,
+    },
     utils::time::Filetime,
 };
 use std::path::Path;

@@ -1,6 +1,14 @@
 use std::{borrow::Cow, path::PathBuf};
 
-use forensic_rs::{activity::{ForensicActivity, ProgramExecution, SessionId}, data::ForensicData, dictionary::*, err::{ForensicError, ForensicResult}, field::{Field, Text}, traits::forensic::{IntoActivity, IntoTimeline, TimeContext, TimelineData}, utils::time::Filetime};
+use forensic_rs::{
+    activity::{ForensicActivity, ProgramExecution, SessionId},
+    data::ForensicData,
+    dictionary::*,
+    err::{ForensicError, ForensicResult},
+    field::{Field, Text},
+    traits::forensic::{IntoActivity, IntoTimeline, TimeContext, TimelineData},
+    utils::time::Filetime,
+};
 
 /// By default blocks will be loaded into executable memory sections
 pub const FLAG_PROGRAM_BLOCK_EXECUTABLE: u32 = 0x0200;
@@ -273,7 +281,7 @@ impl PrefetchFile {
     pub fn executable_path(&self) -> &str {
         for loaded in &self.metrics {
             if loaded.file.ends_with(&self.name) {
-                return &loaded.file
+                return &loaded.file;
             }
         }
         &self.name
@@ -282,16 +290,16 @@ impl PrefetchFile {
     pub fn user(&self) -> Option<&str> {
         for volume in &self.volume {
             for file in &volume.directory_strings {
-                if !file.starts_with(r"\"){
-                    continue
+                if !file.starts_with(r"\") {
+                    continue;
                 }
                 let filename = &file[1..];
                 let mut splited = filename.split(r"\");
-                if let None = splited.next() {
-                    continue
+                if splited.next().is_none() {
+                    continue;
                 };
                 match splited.next() {
-                    Some("USERS") => {},
+                    Some("USERS") => {}
                     _ => continue,
                 };
                 let user = match splited.next() {
@@ -299,46 +307,54 @@ impl PrefetchFile {
                     None => continue,
                 };
                 match splited.next() {
-                    Some("APPDATA") => {},
+                    Some("APPDATA") => {}
                     _ => continue,
                 };
-                return Some(user)
+                return Some(user);
             }
         }
         None
     }
 }
 
-pub struct PrefetchTimelineIterator <'a> {
-    prefetch : &'a PrefetchFile,
-    time_pos : usize
+pub struct PrefetchTimelineIterator<'a> {
+    prefetch: &'a PrefetchFile,
+    time_pos: usize,
 }
-impl <'a> Iterator for PrefetchTimelineIterator<'a> {
+impl<'a> Iterator for PrefetchTimelineIterator<'a> {
     type Item = TimelineData;
     fn next(&mut self) -> Option<Self::Item> {
         let actual_pos = self.time_pos;
         if actual_pos >= self.prefetch.last_run_times.len() {
-            return None
+            return None;
         }
         self.time_pos += 1;
         let mut data = ForensicData::default();
-        data.add_field(FILE_ACCESSED, Field::Date(self.prefetch.last_run_times[actual_pos]));
+        data.add_field(
+            FILE_ACCESSED,
+            Field::Date(self.prefetch.last_run_times[actual_pos]),
+        );
         data.add_field(FILE_PATH, Field::Path(PathBuf::from(&self.prefetch.name)));
-        let dependencies : Vec<Text> = self.prefetch.metrics.iter().map(|v| Cow::Owned(v.file.clone())).collect();
+        let dependencies: Vec<Text> = self
+            .prefetch
+            .metrics
+            .iter()
+            .map(|v| Cow::Owned(v.file.clone()))
+            .collect();
         data.add_field(PE_IMPORTS, Field::Array(dependencies));
         data.add_field("prefetch.execution_times", self.prefetch.run_count.into());
         data.add_field("prefetch.version", self.prefetch.version.into());
         let mut volume_files = Vec::with_capacity(1024);
-        for volumn in self.prefetch.volume.iter(){
+        for volumn in self.prefetch.volume.iter() {
             for files in volumn.directory_strings.iter() {
                 volume_files.push(Cow::Owned(files.clone()))
             }
         }
         data.add_field("prefetch.volume_files", Field::Array(volume_files));
         Some(TimelineData {
-            time : self.prefetch.last_run_times[actual_pos],
+            time: self.prefetch.last_run_times[actual_pos],
             data,
-            time_context : TimeContext::Accessed
+            time_context: TimeContext::Accessed,
         })
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -346,24 +362,27 @@ impl <'a> Iterator for PrefetchTimelineIterator<'a> {
     }
 }
 
-
-pub struct PrefetchActivityIterator <'a> {
-    prefetch : &'a PrefetchFile,
-    time_pos : usize
+pub struct PrefetchActivityIterator<'a> {
+    prefetch: &'a PrefetchFile,
+    time_pos: usize,
 }
-impl <'a> Iterator for PrefetchActivityIterator<'a> {
+impl<'a> Iterator for PrefetchActivityIterator<'a> {
     type Item = ForensicActivity;
     fn next(&mut self) -> Option<Self::Item> {
         let actual_pos = self.time_pos;
         if actual_pos >= self.prefetch.last_run_times.len() {
-            return None
+            return None;
         }
         self.time_pos += 1;
         Some(ForensicActivity {
-            timestamp : self.prefetch.last_run_times[actual_pos],
-            activity : ProgramExecution::new(self.prefetch.executable_path().to_string()).into(),
-            user : self.prefetch.user().map(|v| v.to_string()).unwrap_or_default(),
-            session_id : SessionId::Unknown,
+            timestamp: self.prefetch.last_run_times[actual_pos],
+            activity: ProgramExecution::new(self.prefetch.executable_path().to_string()).into(),
+            user: self
+                .prefetch
+                .user()
+                .map(|v| v.to_string())
+                .unwrap_or_default(),
+            session_id: SessionId::Unknown,
         })
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -374,8 +393,8 @@ impl <'a> Iterator for PrefetchActivityIterator<'a> {
 impl<'a> IntoActivity<'a> for &'a PrefetchFile {
     fn activity(&'a self) -> Self::IntoIter {
         PrefetchActivityIterator {
-            prefetch : self,
-            time_pos : 0
+            prefetch: self,
+            time_pos: 0,
         }
     }
 
@@ -385,8 +404,8 @@ impl<'a> IntoActivity<'a> for &'a PrefetchFile {
 impl<'a> IntoActivity<'a> for PrefetchFile {
     fn activity(&'a self) -> Self::IntoIter {
         PrefetchActivityIterator {
-            prefetch : self,
-            time_pos : 0
+            prefetch: self,
+            time_pos: 0,
         }
     }
 
@@ -396,8 +415,8 @@ impl<'a> IntoActivity<'a> for PrefetchFile {
 impl<'a> IntoTimeline<'a> for &'a PrefetchFile {
     fn timeline(&'a self) -> Self::IntoIter {
         PrefetchTimelineIterator {
-            prefetch : self,
-            time_pos : 0
+            prefetch: self,
+            time_pos: 0,
         }
     }
 
@@ -407,8 +426,8 @@ impl<'a> IntoTimeline<'a> for &'a PrefetchFile {
 impl<'a> IntoTimeline<'a> for PrefetchFile {
     fn timeline(&'a self) -> Self::IntoIter {
         PrefetchTimelineIterator {
-            prefetch : self,
-            time_pos : 0
+            prefetch: self,
+            time_pos: 0,
         }
     }
 
