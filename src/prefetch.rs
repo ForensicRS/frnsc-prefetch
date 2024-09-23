@@ -1,7 +1,12 @@
 use std::{io::Read, path::Path};
 
 use forensic_rs::{
-    artifact::WindowsArtifacts, err::{ForensicError, ForensicResult}, notifications::NotificationType, notify_high, notify_low, traits::vfs::{VDirEntry, VirtualFile, VirtualFileSystem}, utils::time::Filetime
+    artifact::WindowsArtifacts,
+    err::{ForensicError, ForensicResult},
+    notifications::NotificationType,
+    notify_high, notify_low,
+    traits::vfs::{VDirEntry, VirtualFile, VirtualFileSystem},
+    utils::time::Filetime,
 };
 
 use crate::{
