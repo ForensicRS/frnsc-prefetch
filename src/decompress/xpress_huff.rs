@@ -228,8 +228,15 @@ fn prefix_code_tree_rebuild(input: &[u8]) -> ForensicResult<Rc<RefCell<PrefixCod
         if a.length < b.length {
             return Ordering::Less;
         }
+        if a.length > b.length {
+            return Ordering::Greater;
+        }
+
         if a.symbol < b.symbol {
             return Ordering::Less;
+        }
+        if a.symbol > b.symbol {
+            return Ordering::Greater;
         }
         Ordering::Equal
     });
