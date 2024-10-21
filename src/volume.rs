@@ -206,11 +206,12 @@ fn extract_file_references_17(file_reference: &[u8]) -> ForensicResult<Vec<NtfsF
     let file_reference = &file_reference[8..];
     let mut files = Vec::with_capacity(file_reference_count as usize);
     for pos in (0..(file_reference_count as usize * 8)).step_by(8) {
-        let mft_entry = u64_at_pos(file_reference, pos) >> 16;
+        let mft_entry_and_seq = u64_at_pos(file_reference, pos);
+        let mft_entry = mft_entry_and_seq & 0xffffffffffff;
         if mft_entry == 0 {
             continue;
         }
-        let seq_number = u16_at_pos(file_reference, pos + 6);
+        let seq_number = (mft_entry_and_seq >> 48) as u16;
         files.push(NtfsFile {
             mft_entry,
             seq_number,
@@ -234,11 +235,12 @@ fn extract_file_references_23(file_reference: &[u8]) -> ForensicResult<Vec<NtfsF
     let file_reference = &file_reference[16..];
     let mut files = Vec::with_capacity(file_reference_count as usize);
     for pos in (0..(file_reference_count as usize * 8)).step_by(8) {
-        let mft_entry = u64_at_pos(file_reference, pos) >> 16;
+        let mft_entry_and_seq = u64_at_pos(file_reference, pos);
+        let mft_entry = mft_entry_and_seq & 0xffffffffffff;
         if mft_entry == 0 {
             continue;
         }
-        let seq_number = u16_at_pos(file_reference, pos + 6);
+        let seq_number = (mft_entry_and_seq >> 48) as u16;
         files.push(NtfsFile {
             mft_entry,
             seq_number,

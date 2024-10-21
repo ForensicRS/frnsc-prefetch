@@ -1,6 +1,6 @@
 [package]
 name = "frnsc-prefetch"
-version = "0.13.1"
+version = "0.13.2"
 authors = ["Samuel Garcés Marín <samuel.garces@protonmail.com>"]
 keywords = ["forensic", "windows", "prefetch", "registry", "cybersecurity"]
 categories = ["parsing"]
