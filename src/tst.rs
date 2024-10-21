@@ -26,7 +26,8 @@ fn should_parse_prefetch_v17() {
             "./artifacts/17/C/Windows/Prefetch/CMD.EXE-087B4001.pf",
         ))
         .unwrap();
-    read_prefetch_file_no_compressed("CMD.EXE-087B4001.pf", file).unwrap();
+    let a = read_prefetch_file_no_compressed("CMD.EXE-087B4001.pf", file).unwrap();
+    println!("{:?}", a);
 }
 #[test]
 fn should_parse_prefetch_v30_2() {
