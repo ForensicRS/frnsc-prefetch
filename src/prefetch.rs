@@ -229,7 +229,13 @@ fn process_prefetch_data(artifact_name: &str, buffer: &[u8]) -> ForensicResult<P
         prefetch_content.volume = volume_info_30(buffer, &info)?;
         prefetch_content.last_run_times = info.last_run_times;
         prefetch_content.run_count = info.run_count;
-    } else {
+    } else if version == 31 {
+        let info = file_information_30(&buffer[84..])?;
+        prefetch_content.metrics = metrics_array_30(buffer, &info)?;
+        prefetch_content.volume = volume_info_30(buffer, &info)?;
+        prefetch_content.last_run_times = info.last_run_times;
+        prefetch_content.run_count = info.run_count;
+    }else {
         notify_low!(
             NotificationType::Informational,
             "The prefetch version is unknown: {}",
