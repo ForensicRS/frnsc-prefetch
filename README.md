@@ -7,8 +7,9 @@ A pure rust parser implementation of the windows prefetch. Works on all platform
 ```rust
 use forensic_rs::prelude::*;
 use frnsc_prefetch::prelude::*;
-let mut fs = ChRootFileSystem::new("./artifacts/17", Box::new(StdVirtualFS::new()));
-let prefetch_list : <PrefetchFile> = read_prefetch_form_fs(&mut fs).expect("Must read all prefetch from filesystem");
+use std::sync::Arc;
+let fs = ChRootFileSystem::new("./artifacts/17/C", Arc::new(StdVirtualFS::new()));
+let prefetch_list : <PrefetchFile> = read_prefetch_form_fs(&fs).expect("Must read all prefetch from filesystem");
 ```
 
 ### Into Timeline
@@ -34,13 +35,13 @@ A PrefetchFile structure can be converted into [*TimelineData*](https://github.c
 ```
 
 ```rust
-let mut fs = StdVirtualFS::new();
-let file = fs.open(Path::new(
+let fs = StdVirtualFS::new();
+let file = fs.open(FPath::new(
     "./artifacts/30/C/Windows/Prefetch/POWERSHELL.EXE-AE8EDC9B.pf",
 )).unwrap();
 let pref = read_prefetch_file_compressed("POWERSHELL.EXE-AE8EDC9B.pf", file).unwrap();
 let mut forensic_data = pref.timeline();
-let event : TimelineData = forensic_data.next().unwrap();
+let event : TimelineData = forensic_data.next().unwrap().unwrap();
 ```
 
 ### Into Activity
@@ -50,13 +51,13 @@ Transforms a prefetch data into a user activity event in order to know which pro
 `ForensicActivity { timestamp: 06-11-2023 15:18:00.237, user: "WARD", session_id: Unknown, activity: ProgramExecution(\VOLUME{01d98a6b9e4a0a35-1c9e547d}\WINDOWS\SYSWOW64\WINDOWSPOWERSHELL\V1.0\POWERSHELL.EXE) }`
 
 ```rust
-let mut fs = StdVirtualFS::new();
-let file = fs.open(Path::new(
+let fs = StdVirtualFS::new();
+let file = fs.open(FPath::new(
     "./artifacts/30/C/Windows/Prefetch/POWERSHELL.EXE-AE8EDC9B.pf",
 )).unwrap();
 let pref = read_prefetch_file_compressed("POWERSHELL.EXE-AE8EDC9B.pf", file).unwrap();
 let mut forensic_data = pref.activity();
-let activity : ForensicActivity = forensic_data.next().unwrap();
+let activity : ForensicActivity = forensic_data.next().unwrap().unwrap();
 ```
 
 ### Prefetch Format

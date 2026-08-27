@@ -1,45 +1,52 @@
-use forensic_rs::{
-    err::{ForensicError, ForensicResult},
-    notifications::NotificationType,
-};
+use forensic_rs::err::ForensicResult;
 
 use crate::{
-    common::{u32_at_pos, Metric, PrefetchFileInformation},
+    common::{checked_range, u32_at_pos, utf16_at_offset, Metric, PrefetchFileInformation, Trace},
     trace::{traces_for_dependency_v17, traces_for_dependency_v30},
 };
 
-pub fn metrics_array_23(
+type TracesForDependencyFn =
+    fn(&[u8], &PrefetchFileInformation, usize, usize) -> ForensicResult<Vec<Trace>>;
+
+/// v23/v26/v30 metric entry layout: 32-byte stride
+/// (trace_index:u32, trace_size:u32, blocks_to_prefetch:u32, filename_offset:u32,
+/// filename_length:u32, flags:u32, +8 reserved). See [`metrics_array_17`] for the older
+/// 20-byte-stride layout. See `AGENTS.md` for the overall per-version module convention.
+fn metrics_array_32_stride(
     file_buffer: &[u8],
     info: &PrefetchFileInformation,
+    traces_for_dependency: TracesForDependencyFn,
 ) -> ForensicResult<Vec<Metric>> {
-    let end_string_pos = (info.filename_string_offset + info.filename_string_size) as usize;
-    if end_string_pos > file_buffer.len() || info.metrics_offsets as usize > file_buffer.len() {
-        return Err(ForensicError::bad_format_str(
-            "The metrics array position is greater than the file buffer length",
-        ));
-    }
-    let strings_array = &file_buffer[info.filename_string_offset as usize..end_string_pos];
-    let metric_array = &file_buffer[info.metrics_offsets as usize..];
+    let strings_array = &file_buffer[checked_range(
+        info.filename_string_offset,
+        info.filename_string_size,
+        file_buffer.len(),
+        "filename strings array",
+    )?];
+    let metric_array = &file_buffer[checked_range(
+        info.metrics_offsets,
+        info.metrics_count.saturating_mul(32),
+        file_buffer.len(),
+        "metrics array",
+    )?];
     let mut metrics = Vec::with_capacity(info.metrics_count as usize);
     for i in 0..info.metrics_count as usize {
         let entry: &[u8] = &metric_array[i * 32..(i + 1) * 32];
         let trace_index = u32_at_pos(entry, 0) as usize;
         let trace_size = u32_at_pos(entry, 4) as usize;
         let blocks_to_prefetch = u32_at_pos(entry, 8);
-        let filename_offset = u32_at_pos(entry, 12) as usize;
-        let filename_length = u32_at_pos(entry, 16) as usize;
+        let filename_offset = u32_at_pos(entry, 12);
+        let filename_length = u32_at_pos(entry, 16);
         let flags = u32_at_pos(entry, 20);
-        let filename = &strings_array[filename_offset..filename_offset + filename_length];
-        let name_buffer: &[u16] = unsafe { std::mem::transmute(filename) };
-        let end = name_buffer
-            .iter()
-            .position(|&v| v == 0)
-            .unwrap_or(name_buffer.len());
-        let file = String::from_utf16_lossy(&name_buffer[0..end]);
+        let file = utf16_at_offset(
+            strings_array,
+            filename_offset as usize,
+            filename_length as usize,
+        )?;
         let metric = Metric {
             file,
             flags: flags.into(),
-            traces: traces_for_dependency_v17(file_buffer, info, trace_index, trace_size)?,
+            traces: traces_for_dependency(file_buffer, info, trace_index, trace_size)?,
             blocks_to_prefetch,
         };
         check_anomaly_in_metrics(&metric);
@@ -48,35 +55,45 @@ pub fn metrics_array_23(
     Ok(metrics)
 }
 
+pub fn metrics_array_23(
+    file_buffer: &[u8],
+    info: &PrefetchFileInformation,
+) -> ForensicResult<Vec<Metric>> {
+    metrics_array_32_stride(file_buffer, info, traces_for_dependency_v17)
+}
+
+/// v17 metric entry layout: 20-byte stride (trace_index:u32, trace_size:u32,
+/// filename_offset:u32, filename_length:u32, flags:u32). Unlike later versions there is no
+/// separate `blocks_to_prefetch` field — `trace_size` doubles as it.
 pub fn metrics_array_17(
     file_buffer: &[u8],
     info: &PrefetchFileInformation,
 ) -> ForensicResult<Vec<Metric>> {
-    let end_string_pos = (info.filename_string_offset + info.filename_string_size) as usize;
-    if end_string_pos > file_buffer.len()
-        || (info.metrics_offsets + info.metrics_count * 20) as usize > file_buffer.len()
-    {
-        return Err(ForensicError::bad_format_str(
-            "The metrics array position is greater than the file buffer",
-        ));
-    }
-    let strings_array = &file_buffer[info.filename_string_offset as usize..end_string_pos];
-    let metric_array = &file_buffer[info.metrics_offsets as usize..];
+    let strings_array = &file_buffer[checked_range(
+        info.filename_string_offset,
+        info.filename_string_size,
+        file_buffer.len(),
+        "filename strings array",
+    )?];
+    let metric_array = &file_buffer[checked_range(
+        info.metrics_offsets,
+        info.metrics_count.saturating_mul(20),
+        file_buffer.len(),
+        "metrics array",
+    )?];
     let mut metrics = Vec::with_capacity(info.metrics_count as usize);
     for i in 0..info.metrics_count as usize {
         let entry: &[u8] = &metric_array[i * 20..(i + 1) * 20];
         let trace_index = u32_at_pos(entry, 0) as usize;
         let trace_size = u32_at_pos(entry, 4);
-        let filename_offset = u32_at_pos(entry, 8) as usize;
-        let filename_length = u32_at_pos(entry, 12) as usize;
+        let filename_offset = u32_at_pos(entry, 8);
+        let filename_length = u32_at_pos(entry, 12);
         let flags = u32_at_pos(entry, 16);
-        let filename = &strings_array[filename_offset..filename_offset + filename_length];
-        let name_buffer: &[u16] = unsafe { std::mem::transmute(filename) };
-        let end = name_buffer
-            .iter()
-            .position(|&v| v == 0)
-            .unwrap_or(name_buffer.len());
-        let file = String::from_utf16_lossy(&name_buffer[0..end]);
+        let file = utf16_at_offset(
+            strings_array,
+            filename_offset as usize,
+            filename_length as usize,
+        )?;
         let metric = Metric {
             file,
             flags: flags.into(),
@@ -100,53 +117,17 @@ pub fn metrics_array_30(
     file_buffer: &[u8],
     info: &PrefetchFileInformation,
 ) -> ForensicResult<Vec<Metric>> {
-    let end_string_pos = (info.filename_string_offset + info.filename_string_size) as usize;
-    if end_string_pos > file_buffer.len() || info.metrics_offsets as usize > file_buffer.len() {
-        return Err(ForensicError::bad_format_str(
-            "The metrics array position is greater than the file buffer length",
-        ));
-    }
-    let strings_array = &file_buffer[info.filename_string_offset as usize..end_string_pos];
-    let metric_array = &file_buffer[info.metrics_offsets as usize..];
-    let mut metrics = Vec::with_capacity(info.metrics_count as usize);
-    for i in 0..info.metrics_count as usize {
-        let entry: &[u8] = &metric_array[i * 32..(i + 1) * 32];
-        let trace_index = u32_at_pos(entry, 0) as usize;
-        let trace_size = u32_at_pos(entry, 4) as usize;
-        let blocks_to_prefetch = u32_at_pos(entry, 8);
-        let filename_offset = u32_at_pos(entry, 12) as usize;
-        let filename_length = u32_at_pos(entry, 16) as usize;
-        let flags = u32_at_pos(entry, 20);
-        let filename = &strings_array[filename_offset..filename_offset + filename_length];
-        let name_buffer: &[u16] = unsafe { std::mem::transmute(filename) };
-        let end = name_buffer
-            .iter()
-            .position(|&v| v == 0)
-            .unwrap_or(name_buffer.len());
-        let file = String::from_utf16_lossy(&name_buffer[0..end]);
-        let metric = Metric {
-            file,
-            flags: flags.into(),
-            traces: traces_for_dependency_v30(file_buffer, info, trace_index, trace_size)?,
-            blocks_to_prefetch,
-        };
-        check_anomaly_in_metrics(&metric);
-        metrics.push(metric);
-    }
-    Ok(metrics)
+    metrics_array_32_stride(file_buffer, info, traces_for_dependency_v30)
 }
 
 fn check_anomaly_in_metrics(metric: &Metric) {
     if is_resource(&metric.file) {
         // ICON
         if metric.has_executable_block() {
-            forensic_rs::notify_info!(
-                NotificationType::SuspiciousArtifact,
+            forensic_rs::warn!(
                 "The loaded file {} should not have executable blocks",
                 metric.file
             );
-            println!("{:?}", metric.file);
-            //panic!("The loaded file {} should not have executable blocks", metric.file);
         }
     }
 }
@@ -156,4 +137,65 @@ fn is_resource(file: &str) -> bool {
         return true;
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn info_with_strings(
+        metrics_offsets: u32,
+        metrics_count: u32,
+        filename_string_offset: u32,
+        filename_string_size: u32,
+    ) -> PrefetchFileInformation {
+        PrefetchFileInformation {
+            metrics_offsets,
+            metrics_count,
+            filename_string_offset,
+            filename_string_size,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn metrics_array_17_decodes_single_entry() {
+        // strings array: "A" + NUL (4 bytes)
+        let strings = [0x41, 0x00, 0x00, 0x00];
+        // entry (20 bytes): trace_index@0, trace_size@4, filename_offset@8=0,
+        // filename_length@12=4, flags@16
+        let mut entry = [0u8; 20];
+        entry[12..16].copy_from_slice(&4u32.to_le_bytes());
+        let mut buffer = Vec::new();
+        buffer.extend_from_slice(&strings); // filename_string_offset = 0, size = 4
+        buffer.extend_from_slice(&entry); // metrics_offsets = 4
+        let info = info_with_strings(4, 1, 0, 4);
+        let metrics = metrics_array_17(&buffer, &info).unwrap();
+        assert_eq!(metrics.len(), 1);
+        assert_eq!(metrics[0].file, "A");
+    }
+
+    #[test]
+    fn metrics_array_17_rejects_metrics_offsets_past_buffer() {
+        let info = info_with_strings(1000, 1, 0, 0);
+        let buffer = vec![0u8; 20];
+        assert!(metrics_array_17(&buffer, &info).is_err());
+    }
+
+    #[test]
+    fn metrics_array_23_rejects_metrics_count_overflowing_u32_instead_of_panicking() {
+        // metrics_count * 32 would overflow u32 if computed naively
+        let info = info_with_strings(0, u32::MAX, 0, 0);
+        let buffer = vec![0u8; 32];
+        assert!(metrics_array_23(&buffer, &info).is_err());
+    }
+
+    #[test]
+    fn metrics_array_23_rejects_filename_length_past_strings_array() {
+        let mut buffer = vec![0u8; 32]; // one 32-byte metric entry, empty strings array
+        buffer[12..16].copy_from_slice(&0u32.to_le_bytes()); // filename_offset = 0
+        buffer[16..20].copy_from_slice(&u32::MAX.to_le_bytes()); // filename_length, absurd
+        let info = info_with_strings(0, 1, 0, 0);
+        assert!(metrics_array_23(&buffer, &info).is_err());
+    }
 }

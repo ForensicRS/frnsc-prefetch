@@ -1,4 +1,4 @@
-use std::{borrow::Cow, path::PathBuf};
+use std::{borrow::Cow, collections::BTreeMap};
 
 use forensic_rs::{
     activity::{ForensicActivity, ProgramExecution, SessionId},
@@ -6,6 +6,7 @@ use forensic_rs::{
     dictionary::*,
     err::{ForensicError, ForensicResult},
     field::{Field, Text},
+    provenance::{Acquisition, ProvenanceId, ProvenanceStore, Recovery, SourceKey},
     traits::forensic::{IntoActivity, IntoTimeline, TimeContext, TimelineData},
     utils::time::Filetime,
 };
@@ -125,23 +126,7 @@ impl core::fmt::Debug for PrefetchFlag {
 
 impl core::fmt::Display for PrefetchFlag {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut writed = 0;
-        if self.is_executable() {
-            f.write_str("X")?;
-            writed += 1;
-        }
-        if self.is_resource() {
-            f.write_str("R")?;
-            writed += 1;
-        }
-        if self.is_not_prefetched() {
-            f.write_str("D")?;
-            writed += 1;
-        }
-        if writed == 0 {
-            f.write_str("-")?;
-        }
-        Ok(())
+        core::fmt::Debug::fmt(self, f)
     }
 }
 #[derive(Clone, Default)]
@@ -196,27 +181,7 @@ impl From<u8> for BlockFlags {
 
 impl core::fmt::Display for BlockFlags {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut writed = 0;
-        if self.is_executable() {
-            f.write_str("X")?;
-            writed += 1;
-        }
-        if self.is_resource() {
-            f.write_str("R")?;
-            writed += 1;
-        }
-        if self.is_force_prefetch() {
-            f.write_str("F")?;
-            writed += 1;
-        }
-        if self.is_not_prefetched() {
-            f.write_str("D")?;
-            writed += 1;
-        }
-        if writed == 0 {
-            f.write_str("-")?;
-        }
-        Ok(())
+        core::fmt::Debug::fmt(self, f)
     }
 }
 
@@ -235,31 +200,64 @@ pub struct NtfsFile {
     pub seq_number: u16,
 }
 
+/// Bounds-checks `offset..offset+len` against `buffer_len`, widening to `u64` first so a
+/// corrupt/adversarial `offset`/`len` pair can't overflow `u32` and defeat the check.
+pub(crate) fn checked_range(
+    offset: u32,
+    len: u32,
+    buffer_len: usize,
+    field: &'static str,
+) -> ForensicResult<std::ops::Range<usize>> {
+    let end = offset as u64 + len as u64;
+    if end as usize > buffer_len {
+        return Err(ForensicError::invalid_format(
+            "prefetch",
+            format!("{field}: position is greater than the file buffer"),
+        ));
+    }
+    Ok(offset as usize..end as usize)
+}
+
 pub fn utf16_at_offset(file_buffer: &[u8], offset: usize, size: usize) -> ForensicResult<String> {
     let end_pos = offset + size;
     if end_pos > file_buffer.len() {
-        return Err(ForensicError::bad_format_str(
+        return Err(ForensicError::invalid_format(
+            "prefetch",
             "The utf16 string position is greater than the file buffer",
         ));
     }
     let txt = &file_buffer[offset..end_pos];
-    let txt_u16: &[u16] = unsafe { std::mem::transmute(txt) };
-    let end = txt_u16
-        .iter()
-        .position(|&v| v == 0)
-        .unwrap_or(txt_u16.len());
-    let txt = String::from_utf16_lossy(&txt_u16[0..end]);
-    Ok(txt)
+    let units: Vec<u16> = txt
+        .chunks_exact(2)
+        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .collect();
+    let end = units.iter().position(|&v| v == 0).unwrap_or(units.len());
+    Ok(String::from_utf16_lossy(&units[0..end]))
 }
 
+/// Reads a little-endian `u16` at `pos`, defaulting to `0` if `pos..pos+2` is out of bounds.
+/// Uses `buffer.get(..)` rather than direct slicing: a plain `buffer[pos..pos + 2]` panics on
+/// an out-of-range `pos` before any fallback logic can run.
 pub fn u16_at_pos(buffer: &[u8], pos: usize) -> u16 {
-    u16::from_le_bytes(buffer[pos..pos + 2].try_into().unwrap_or_default())
+    buffer
+        .get(pos..pos + 2)
+        .and_then(|s| s.try_into().ok())
+        .map(u16::from_le_bytes)
+        .unwrap_or_default()
 }
 pub fn u32_at_pos(buffer: &[u8], pos: usize) -> u32 {
-    u32::from_le_bytes(buffer[pos..pos + 4].try_into().unwrap_or_default())
+    buffer
+        .get(pos..pos + 4)
+        .and_then(|s| s.try_into().ok())
+        .map(u32::from_le_bytes)
+        .unwrap_or_default()
 }
 pub fn u64_at_pos(buffer: &[u8], pos: usize) -> u64 {
-    u64::from_le_bytes(buffer[pos..pos + 8].try_into().unwrap_or_default())
+    buffer
+        .get(pos..pos + 8)
+        .and_then(|s| s.try_into().ok())
+        .map(u64::from_le_bytes)
+        .unwrap_or_default()
 }
 
 impl Metric {
@@ -317,24 +315,37 @@ impl PrefetchFile {
     }
 }
 
+/// Mints a fresh provenance id for a standalone (non-pipeline) conversion of a single
+/// [`PrefetchFile`]. Every record derived from the same file shares this id.
+fn mint_provenance(name: &str) -> ProvenanceId {
+    ProvenanceStore::new()
+        .register_source(SourceKey::Path(name.to_string()))
+        .mint(Acquisition::ImageRead, Recovery::Allocated)
+}
+
 pub struct PrefetchTimelineIterator<'a> {
     prefetch: &'a PrefetchFile,
     time_pos: usize,
+    provenance: ProvenanceId,
 }
 impl<'a> Iterator for PrefetchTimelineIterator<'a> {
-    type Item = TimelineData;
+    type Item = ForensicResult<TimelineData>;
     fn next(&mut self) -> Option<Self::Item> {
         let actual_pos = self.time_pos;
         if actual_pos >= self.prefetch.last_run_times.len() {
             return None;
         }
         self.time_pos += 1;
-        let mut data = ForensicData::default();
+        let ctx = forensic_rs::context::context();
+        let mut data = ForensicData::new(&ctx.host, ctx.artifact.clone(), self.provenance);
         data.add_field(
             FILE_ACCESSED,
-            Field::Date(self.prefetch.last_run_times[actual_pos]),
+            self.prefetch.last_run_times[actual_pos].into(),
         );
-        data.add_field(FILE_PATH, Field::Path(PathBuf::from(&self.prefetch.name)));
+        data.add_field(
+            FILE_PATH,
+            Field::Text(Cow::Owned(self.prefetch.name.clone())),
+        );
         let dependencies: Vec<Text> = self
             .prefetch
             .metrics
@@ -351,11 +362,11 @@ impl<'a> Iterator for PrefetchTimelineIterator<'a> {
             }
         }
         data.add_field("prefetch.volume_files", Field::Array(volume_files));
-        Some(TimelineData {
-            time: self.prefetch.last_run_times[actual_pos],
+        Some(Ok(TimelineData {
+            time: self.prefetch.last_run_times[actual_pos].into(),
             data,
             time_context: TimeContext::Accessed,
-        })
+        }))
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
         (self.time_pos, Some(self.prefetch.last_run_times.len()))
@@ -367,15 +378,15 @@ pub struct PrefetchActivityIterator<'a> {
     time_pos: usize,
 }
 impl<'a> Iterator for PrefetchActivityIterator<'a> {
-    type Item = ForensicActivity;
+    type Item = ForensicResult<ForensicActivity>;
     fn next(&mut self) -> Option<Self::Item> {
         let actual_pos = self.time_pos;
         if actual_pos >= self.prefetch.last_run_times.len() {
             return None;
         }
         self.time_pos += 1;
-        Some(ForensicActivity {
-            timestamp: self.prefetch.last_run_times[actual_pos],
+        Some(Ok(ForensicActivity {
+            timestamp: self.prefetch.last_run_times[actual_pos].into(),
             activity: ProgramExecution::new(self.prefetch.executable_path().to_string()).into(),
             user: self
                 .prefetch
@@ -383,7 +394,8 @@ impl<'a> Iterator for PrefetchActivityIterator<'a> {
                 .map(|v| v.to_string())
                 .unwrap_or_default(),
             session_id: SessionId::Unknown,
-        })
+            extras: BTreeMap::new(),
+        }))
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
         (self.time_pos, Some(self.prefetch.last_run_times.len()))
@@ -398,7 +410,10 @@ impl<'a> IntoActivity<'a> for &'a PrefetchFile {
         }
     }
 
-    type IntoIter = PrefetchActivityIterator<'a> where Self: 'a;
+    type IntoIter
+        = PrefetchActivityIterator<'a>
+    where
+        Self: 'a;
 }
 
 impl<'a> IntoActivity<'a> for PrefetchFile {
@@ -409,7 +424,10 @@ impl<'a> IntoActivity<'a> for PrefetchFile {
         }
     }
 
-    type IntoIter = PrefetchActivityIterator<'a> where Self: 'a;
+    type IntoIter
+        = PrefetchActivityIterator<'a>
+    where
+        Self: 'a;
 }
 
 impl<'a> IntoTimeline<'a> for &'a PrefetchFile {
@@ -417,10 +435,14 @@ impl<'a> IntoTimeline<'a> for &'a PrefetchFile {
         PrefetchTimelineIterator {
             prefetch: self,
             time_pos: 0,
+            provenance: mint_provenance(&self.name),
         }
     }
 
-    type IntoIter = PrefetchTimelineIterator<'a> where Self: 'a;
+    type IntoIter
+        = PrefetchTimelineIterator<'a>
+    where
+        Self: 'a;
 }
 
 impl<'a> IntoTimeline<'a> for PrefetchFile {
@@ -428,8 +450,146 @@ impl<'a> IntoTimeline<'a> for PrefetchFile {
         PrefetchTimelineIterator {
             prefetch: self,
             time_pos: 0,
+            provenance: mint_provenance(&self.name),
         }
     }
 
-    type IntoIter = PrefetchTimelineIterator<'a> where Self: 'a;
+    type IntoIter
+        = PrefetchTimelineIterator<'a>
+    where
+        Self: 'a;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn utf16_at_offset_decodes_nul_terminated_string() {
+        // "AB" + NUL + trailing bytes that must be ignored
+        let buffer = [0x41, 0x00, 0x42, 0x00, 0x00, 0x00, 0xFF, 0xFF];
+        let text = utf16_at_offset(&buffer, 0, 8).unwrap();
+        assert_eq!(text, "AB");
+    }
+
+    #[test]
+    fn utf16_at_offset_uses_full_size_when_no_nul() {
+        let buffer = [0x41, 0x00, 0x42, 0x00];
+        let text = utf16_at_offset(&buffer, 0, 4).unwrap();
+        assert_eq!(text, "AB");
+    }
+
+    #[test]
+    fn utf16_at_offset_rejects_out_of_bounds_range() {
+        let buffer = [0x41, 0x00];
+        assert!(utf16_at_offset(&buffer, 0, 4).is_err());
+    }
+
+    #[test]
+    fn utf16_at_offset_empty_size_yields_empty_string() {
+        let buffer = [0x41, 0x00];
+        let text = utf16_at_offset(&buffer, 0, 0).unwrap();
+        assert_eq!(text, "");
+    }
+
+    #[test]
+    fn checked_range_rejects_overflowing_offset_and_len() {
+        // offset + len would overflow u32 if computed naively
+        assert!(checked_range(u32::MAX, 2, 100, "test field").is_err());
+    }
+
+    #[test]
+    fn checked_range_accepts_in_bounds_range() {
+        let range = checked_range(2, 4, 10, "test field").unwrap();
+        assert_eq!(range, 2..6);
+    }
+
+    #[test]
+    fn u16_u32_u64_at_pos_read_little_endian() {
+        let buffer = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
+        assert_eq!(u16_at_pos(&buffer, 0), 0x0201);
+        assert_eq!(u32_at_pos(&buffer, 0), 0x04030201);
+        assert_eq!(u64_at_pos(&buffer, 0), 0x0807060504030201);
+    }
+
+    #[test]
+    fn u32_at_pos_defaults_to_zero_when_out_of_bounds() {
+        let buffer = [0x01, 0x02];
+        assert_eq!(u32_at_pos(&buffer, 0), 0);
+    }
+
+    #[test]
+    fn prefetch_flag_debug_and_display_agree() {
+        let flag: PrefetchFlag = FLAG_PROGRAM_BLOCK_EXECUTABLE.into();
+        assert_eq!(format!("{:?}", flag), "X");
+        assert_eq!(format!("{flag}"), "X");
+    }
+
+    #[test]
+    fn prefetch_flag_defaults_to_dash_when_no_bits_set() {
+        let flag: PrefetchFlag = 0u32.into();
+        assert_eq!(format!("{:?}", flag), "-");
+    }
+
+    #[test]
+    fn block_flags_debug_and_display_agree() {
+        let flags: BlockFlags = (FLAG_BLOCK_EXECUTABLE | FLAG_BLOCK_FORCE_PREFETCH).into();
+        assert_eq!(format!("{:?}", flags), "XF");
+        assert_eq!(format!("{flags}"), "XF");
+    }
+
+    #[test]
+    fn executable_path_falls_back_to_name_without_matching_metric() {
+        let prefetch = PrefetchFile {
+            name: "CMD.EXE".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(prefetch.executable_path(), "CMD.EXE");
+    }
+
+    #[test]
+    fn executable_path_prefers_matching_metric_full_path() {
+        let prefetch = PrefetchFile {
+            name: "CMD.EXE".to_string(),
+            metrics: vec![Metric {
+                file: r"\VOLUME{...}\WINDOWS\SYSTEM32\CMD.EXE".to_string(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        assert_eq!(
+            prefetch.executable_path(),
+            r"\VOLUME{...}\WINDOWS\SYSTEM32\CMD.EXE"
+        );
+    }
+
+    #[test]
+    fn user_extracts_username_from_well_formed_path() {
+        let prefetch = PrefetchFile {
+            volume: vec![VolumeInformation {
+                directory_strings: vec![r"\VOLUME{GUID}\USERS\ALICE\APPDATA\LOCAL".to_string()],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        assert_eq!(prefetch.user(), Some("ALICE"));
+    }
+
+    #[test]
+    fn user_returns_none_without_users_segment() {
+        let prefetch = PrefetchFile {
+            volume: vec![VolumeInformation {
+                directory_strings: vec![r"\VOLUME{GUID}\WINDOWS\SYSTEM32".to_string()],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        assert_eq!(prefetch.user(), None);
+    }
+
+    #[test]
+    fn user_returns_none_without_any_volumes() {
+        let prefetch = PrefetchFile::default();
+        assert_eq!(prefetch.user(), None);
+    }
 }

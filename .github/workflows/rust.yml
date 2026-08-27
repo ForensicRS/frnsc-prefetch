@@ -26,3 +26,21 @@ jobs:
 
     - name: Run tests
       run: cargo test --verbose
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Set up Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+        components: clippy, rustfmt
+
+    - name: cargo fmt --check
+      run: cargo fmt --check
+
+    - name: cargo clippy
+      run: cargo clippy --all-targets --all-features -- -D warnings

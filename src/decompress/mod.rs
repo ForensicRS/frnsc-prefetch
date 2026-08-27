@@ -1,29 +1,7 @@
-use forensic_rs::prelude::ForensicResult;
+use forensic_rs::err::ForensicResult;
+use forensic_rs::utils::win::decompress::{lz77, lznt1, xpress_huff};
 
-pub mod lz77;
-pub mod xpress_huff;
-
-#[repr(u32)]
-#[derive(Debug, Clone)]
-pub enum CompressionAlgorithm {
-    CompressionFormatNone = 0x0000,
-    CompressionFormatDefault = 0x0001,
-    CompressionFormatLznt1 = 0x0002,
-    CompressionFormatXpress = 0x0003,
-    CompressionFormatXpressHuff = 0x0004,
-}
-
-impl From<u32> for CompressionAlgorithm {
-    fn from(value: u32) -> Self {
-        match value {
-            1 => CompressionAlgorithm::CompressionFormatDefault,
-            2 => CompressionAlgorithm::CompressionFormatLznt1,
-            3 => CompressionAlgorithm::CompressionFormatXpress,
-            4 => CompressionAlgorithm::CompressionFormatXpressHuff,
-            _ => CompressionAlgorithm::CompressionFormatNone,
-        }
-    }
-}
+pub use forensic_rs::utils::win::decompress::CompressionAlgorithm;
 
 pub fn decompress(
     in_buf: &[u8],
@@ -32,18 +10,104 @@ pub fn decompress(
 ) -> ForensicResult<()> {
     match algorithm {
         CompressionAlgorithm::CompressionFormatNone => {
-            out_buf.copy_from_slice(in_buf);
+            out_buf.extend_from_slice(in_buf);
         }
         CompressionAlgorithm::CompressionFormatDefault => {
-            return Err(forensic_rs::err::ForensicError::Other(
-                "Default compression algorithm not supported".into(),
+            return Err(forensic_rs::err::ForensicError::other(
+                "prefetch",
+                "Default compression algorithm not supported".to_string(),
             ))
         }
-        CompressionAlgorithm::CompressionFormatLznt1 => lz77::decompress(in_buf, out_buf)?,
-        CompressionAlgorithm::CompressionFormatXpress => xpress_huff::decompress(in_buf, out_buf)?, // Can't happen
+        CompressionAlgorithm::CompressionFormatLznt1 => lznt1::decompress(in_buf, out_buf)?,
+        CompressionAlgorithm::CompressionFormatXpress => lz77::decompress(in_buf, out_buf)?,
         CompressionAlgorithm::CompressionFormatXpressHuff => {
             xpress_huff::decompress(in_buf, out_buf)?
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Regression test for the CompressionFormatXpress/CompressionFormatXpressHuff/
+    // CompressionFormatLznt1 dispatch: both forensic-rs's and this crate's original
+    // dispatcher wired `Xpress` to the Huffman decoder and `Lznt1` to plain LZ77 (with
+    // no real LZNT1 decoder at all), which is backwards. These vectors (moved here from
+    // the now-deleted local lz77.rs/xpress_huff.rs/lznt1.rs) drive the fix through
+    // `decompress()` itself, not the underlying algorithm functions directly, so a
+    // re-introduced mis-wiring would fail here.
+
+    #[test]
+    fn dispatches_lznt1_to_the_real_lznt1_decoder() {
+        // Cross-checked against libyal/libfwnt's documented LZNT1 worked example: a
+        // single literal byte followed by copy-token 0x0ffc RLE-fills to a 4096-byte
+        // run of the same byte.
+        let encoded: [u8; 6] = [0x03, 0x80, 0x02, 0x41, 0xfc, 0x0f];
+        let mut decoded_value = Vec::new();
+        decompress(
+            &encoded,
+            &mut decoded_value,
+            CompressionAlgorithm::CompressionFormatLznt1,
+        )
+        .unwrap();
+        assert_eq!(decoded_value.len(), 4096);
+        assert!(decoded_value.iter().all(|&b| b == 0x41));
+    }
+
+    #[test]
+    fn dispatches_xpress_to_plain_lz77() {
+        let uncompressed = b"abcdefghijklmnopqrstuvwxyz";
+        let encoded: [u8; 30] = [
+            0x3f, 0x00, 0x00, 0x00, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6a,
+            0x6b, 0x6c, 0x6d, 0x6e, 0x6f, 0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78,
+            0x79, 0x7a,
+        ];
+
+        let mut decoded_value = Vec::with_capacity(1024);
+        decompress(
+            &encoded,
+            &mut decoded_value,
+            CompressionAlgorithm::CompressionFormatXpress,
+        )
+        .unwrap();
+        assert_eq!(uncompressed, &decoded_value[..]);
+    }
+
+    #[test]
+    fn dispatches_xpress_huff_to_huffman_decoder() {
+        let uncompressed = b"abcdefghijklmnopqrstuvwxyz";
+        let encoded: [u8; 276] = [
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x50, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55,
+            0x55, 0x55, 0x55, 0x45, 0x44, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0xd8, 0x52, 0x3e, 0xd7, 0x94, 0x11, 0x5b, 0xe9, 0x19, 0x5f,
+            0xf9, 0xd6, 0x7c, 0xdf, 0x8d, 0x04, 0x00, 0x00, 0x00, 0x00,
+        ];
+
+        let mut decoded_value = Vec::with_capacity(uncompressed.len());
+        decompress(
+            &encoded,
+            &mut decoded_value,
+            CompressionAlgorithm::CompressionFormatXpressHuff,
+        )
+        .unwrap();
+        assert_eq!(uncompressed, &decoded_value[..]);
+    }
 }

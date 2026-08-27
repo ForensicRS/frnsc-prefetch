@@ -1,12 +1,15 @@
 use forensic_rs::{
-    core::fs::{ChRootFileSystem, StdVirtualFS},
+    core::{
+        fs::{ChRootFileSystem, StdVirtualFS},
+        path::FPath,
+    },
     traits::{
         forensic::{IntoActivity, IntoTimeline},
-        vfs::VirtualFileSystem,
+        vfs::FileSystem,
     },
-    utils::time::Filetime,
+    utils::{testing::InMemoryVirtualFileSystem, time::Filetime},
 };
-use std::path::Path;
+use std::sync::Arc;
 
 use crate::prefetch::{
     read_prefetch_file_compressed, read_prefetch_file_no_compressed, read_prefetch_form_fs,
@@ -14,15 +17,17 @@ use crate::prefetch::{
 
 #[test]
 fn should_parse_all_prefetchs_from_fs() {
-    let mut fs = ChRootFileSystem::new("./artifacts/17", Box::new(StdVirtualFS::new()));
-    read_prefetch_form_fs(&mut fs).expect("Must read all prefetch from filesystem");
+    // ChRootFileSystem's root represents the drive itself (drive designators in
+    // queried paths are stripped, not honored) — root at the fixture's "C" folder.
+    let fs = ChRootFileSystem::new("./artifacts/17/C", Arc::new(StdVirtualFS::new()));
+    read_prefetch_form_fs(&fs).expect("Must read all prefetch from filesystem");
 }
 
 #[test]
 fn should_parse_prefetch_v17() {
-    let mut fs = StdVirtualFS::new();
+    let fs = StdVirtualFS::new();
     let file = fs
-        .open(Path::new(
+        .open(FPath::new(
             "./artifacts/17/C/Windows/Prefetch/CMD.EXE-087B4001.pf",
         ))
         .unwrap();
@@ -31,9 +36,9 @@ fn should_parse_prefetch_v17() {
 }
 #[test]
 fn should_parse_prefetch_v30_2() {
-    let mut fs = StdVirtualFS::new();
+    let fs = StdVirtualFS::new();
     let file = fs
-        .open(Path::new(
+        .open(FPath::new(
             "./artifacts/30/C/Windows/Prefetch/RUST_OUT.EXE-5D2C8541.pf",
         ))
         .unwrap();
@@ -41,9 +46,9 @@ fn should_parse_prefetch_v30_2() {
 }
 #[test]
 fn should_parse_prefetch_v30() {
-    let mut fs = StdVirtualFS::new();
+    let fs = StdVirtualFS::new();
     let file = fs
-        .open(Path::new(
+        .open(FPath::new(
             "./artifacts/30/C/Windows/Prefetch/CMD.EXE-D269B812.pf",
         ))
         .unwrap();
@@ -52,9 +57,9 @@ fn should_parse_prefetch_v30() {
 
 #[test]
 fn should_parse_prefetch_v26() {
-    let mut fs = StdVirtualFS::new();
+    let fs = StdVirtualFS::new();
     let file = fs
-        .open(Path::new(
+        .open(FPath::new(
             "./artifacts/26/C/Windows/Prefetch/CMD.EXE-4A81B364.pf",
         ))
         .unwrap();
@@ -63,9 +68,9 @@ fn should_parse_prefetch_v26() {
 
 #[test]
 fn should_parse_prefetch_v23() {
-    let mut fs = StdVirtualFS::new();
+    let fs = StdVirtualFS::new();
     let file = fs
-        .open(Path::new(
+        .open(FPath::new(
             "./artifacts/23/C/Windows/Prefetch/NOTEPAD.EXE-D8414F97.pf",
         ))
         .unwrap();
@@ -74,26 +79,26 @@ fn should_parse_prefetch_v23() {
 
 #[test]
 fn should_parse_prefetch_v30_powershell() {
-    let mut fs = StdVirtualFS::new();
+    let fs = StdVirtualFS::new();
     let file = fs
-        .open(Path::new(
+        .open(FPath::new(
             "./artifacts/30/C/Windows/Prefetch/POWERSHELL.EXE-AE8EDC9B.pf",
         ))
         .unwrap();
     let pref = read_prefetch_file_compressed("POWERSHELL.EXE-AE8EDC9B.pf", file).unwrap();
     let mut forensic_data = pref.timeline();
-    let event = forensic_data.next().unwrap();
+    let event = forensic_data.next().unwrap().unwrap();
     println!("{:?}", event);
     let mut forensic_data = pref.activity();
-    let activity = forensic_data.next().unwrap();
+    let activity = forensic_data.next().unwrap().unwrap();
     println!("Activity: {:?}", activity);
 }
 
 #[test]
 fn should_parse_prefetch_v30_cmd() {
-    let mut fs = StdVirtualFS::new();
+    let fs = StdVirtualFS::new();
     let file = fs
-        .open(Path::new(
+        .open(FPath::new(
             "./artifacts/30/C/Windows/Prefetch/CMD.EXE-6D6290C5.pf",
         ))
         .unwrap();
@@ -110,7 +115,55 @@ fn should_parse_prefetch_v30_cmd() {
 #[test]
 #[ignore]
 fn should_parse_current_prefetches() {
-    let mut fs = StdVirtualFS::new();
-    let _pref = read_prefetch_form_fs(&mut fs).expect("Must read all prefetch from filesystem");
+    let fs = StdVirtualFS::new();
+    let _pref = read_prefetch_form_fs(&fs).expect("Must read all prefetch from filesystem");
     //println!("{:?}", pref);
+}
+
+// Negative-path tests: a forensic parser processes potentially corrupted or adversarial
+// evidence, so a malformed file must be rejected with an `Err`, never panic.
+
+fn open_in_memory(bytes: Vec<u8>) -> Box<dyn forensic_rs::traits::vfs::VirtualFile> {
+    InMemoryVirtualFileSystem::new()
+        .with_file("bad.pf", bytes)
+        .open(FPath::new("bad.pf"))
+        .unwrap()
+}
+
+#[test]
+fn rejects_prefetch_header_shorter_than_84_bytes() {
+    let file = open_in_memory(vec![0u8; 10]);
+    assert!(read_prefetch_file_no_compressed("bad.pf", file).is_err());
+}
+
+#[test]
+fn rejects_bad_signature() {
+    let mut buffer = vec![0u8; 84];
+    buffer[0..4].copy_from_slice(&17u32.to_le_bytes());
+    buffer[4..8].copy_from_slice(b"XXXX");
+    let file = open_in_memory(buffer);
+    assert!(read_prefetch_file_no_compressed("bad.pf", file).is_err());
+}
+
+#[test]
+fn rejects_unknown_version() {
+    let mut buffer = vec![0u8; 84];
+    buffer[0..4].copy_from_slice(&99u32.to_le_bytes());
+    buffer[4..8].copy_from_slice(b"SCCA");
+    let file = open_in_memory(buffer);
+    assert!(read_prefetch_file_no_compressed("bad.pf", file).is_err());
+}
+
+#[test]
+fn rejects_corrupted_huge_offsets_without_panicking() {
+    // Valid v17 header/signature, but the version-specific info starting at byte 84
+    // (metrics_offsets/metrics_count) is corrupted to an absurd value that would
+    // previously overflow u32 arithmetic during bounds-checking.
+    let mut buffer = vec![0u8; 200];
+    buffer[0..4].copy_from_slice(&17u32.to_le_bytes());
+    buffer[4..8].copy_from_slice(b"SCCA");
+    buffer[84..88].copy_from_slice(&u32::MAX.to_le_bytes()); // metrics_offsets
+    buffer[88..92].copy_from_slice(&u32::MAX.to_le_bytes()); // metrics_count
+    let file = open_in_memory(buffer);
+    assert!(read_prefetch_file_no_compressed("bad.pf", file).is_err());
 }
