@@ -208,24 +208,36 @@ pub(crate) fn checked_range(
     buffer_len: usize,
     field: &'static str,
 ) -> ForensicResult<std::ops::Range<usize>> {
-    let end = offset as u64 + len as u64;
-    if end as usize > buffer_len {
+    let end = u64::from(offset) + u64::from(len);
+    let end_usize = usize::try_from(end).map_err(|_| {
+        ForensicError::invalid_format("prefetch", format!("{field}: position overflows usize"))
+    })?;
+    if end_usize > buffer_len {
         return Err(ForensicError::invalid_format(
             "prefetch",
             format!("{field}: position is greater than the file buffer"),
         ));
     }
-    Ok(offset as usize..end as usize)
+    Ok(offset as usize..end_usize)
 }
 
 pub fn utf16_at_offset(file_buffer: &[u8], offset: usize, size: usize) -> ForensicResult<String> {
-    let end_pos = offset + size;
-    if end_pos > file_buffer.len() {
+    // Widen to `u64` before adding: `offset`/`size` are ultimately derived from file-controlled
+    // `u32` fields, so a plain `usize` addition could overflow (panicking in debug, wrapping to a
+    // bogus small `end_pos` in release) on malformed input, mirroring `checked_range` above.
+    let end_pos = offset as u64 + size as u64;
+    if end_pos > file_buffer.len() as u64 {
         return Err(ForensicError::invalid_format(
             "prefetch",
             "The utf16 string position is greater than the file buffer",
         ));
     }
+    let end_pos = usize::try_from(end_pos).map_err(|_| {
+        ForensicError::invalid_format(
+            "prefetch",
+            "The utf16 string position overflows usize",
+        )
+    })?;
     let txt = &file_buffer[offset..end_pos];
     let units: Vec<u16> = txt
         .chunks_exact(2)

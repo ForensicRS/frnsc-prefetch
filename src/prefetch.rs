@@ -15,7 +15,18 @@ use crate::{
     volume::*,
 };
 
+/// Maximum accepted size, in bytes, for a prefetch file read off disk. Real-world Windows `.pf`
+/// files (one per executable, capped at 8 run-time/trace-chain slots) are typically tens to a
+/// few hundred KB even for dependency-heavy executables; 1 MB gives generous headroom above
+/// observed sizes while still bounding worst-case memory use for a single file.
 const PREFETCH_SIZE_LIMIT: u64 = 1_000_000;
+/// Maximum accepted *decompressed* size declared in a compressed prefetch file's header. This is
+/// checked before allocating the decompression output buffer: the on-disk size is already bounded
+/// by [`PREFETCH_SIZE_LIMIT`], but `decompressed_size` is an attacker/corruption-controlled `u32`
+/// read from that header, so without this cap a tiny compressed file could declare a
+/// multi-gigabyte decompressed size and trigger a large-allocation attempt before the decompressor
+/// has verified anything. 64 MB is far beyond any real prefetch file's decompressed size.
+const PREFETCH_DECOMPRESSED_SIZE_LIMIT: u64 = 64_000_000;
 /// Signature = MAM
 // Predates this quality pass (forensic-rs 0.14 migration); left as an array literal rather
 // than the clippy-suggested byte-string form to avoid touching unrelated migration code.
@@ -65,7 +76,10 @@ pub fn read_prefetch_form_fs(fs: &impl FileSystem) -> ForensicResult<Vec<Prefetc
                 prefetches.push(v);
             }
             Err(e) => {
-                forensic_rs::info!("Error procesing prefetch {}: {}", file_name, e);
+                // warn!, not info!: this drops a forensic artifact from the batch result
+                // entirely (e.g. it exceeded PREFETCH_SIZE_LIMIT), which should be visible
+                // under normal log-level filtering rather than only in verbose logs.
+                forensic_rs::warn!("Error procesing prefetch {}: {}", file_name, e);
             }
         };
     }
@@ -156,6 +170,14 @@ pub fn read_prefetch_file_compressed(
                 "The CRC of the prefetch does not match",
             ));
         }
+    }
+    if u64::from(decompressed_size) > PREFETCH_DECOMPRESSED_SIZE_LIMIT {
+        forensic_rs::warn!("Declared decompressed prefetch size is abnormally large");
+        return Err(ForensicError::file_size_error(
+            "prefetch_file_decompressed",
+            PREFETCH_DECOMPRESSED_SIZE_LIMIT,
+            u64::from(decompressed_size),
+        ));
     }
     let mut decompressed = Vec::with_capacity(decompressed_size as usize);
     decompress(compressed, &mut decompressed, compress_algorithm)?;

@@ -37,92 +37,104 @@ fn checked_entry_range(
     Ok(())
 }
 
+/// Byte offsets of a trace-chain entry's fields, relative to the start of that entry. v17 uses a
+/// 12-byte stride with a leading 4-byte field this crate doesn't need (hence `block_offset` at 4,
+/// not 0); v30 dropped that leading field, shrinking the stride to 8 and shifting every offset
+/// down accordingly.
+#[derive(Clone, Copy)]
+struct TraceFieldOffsets {
+    block_offset: usize,
+    flags: usize,
+    used: usize,
+    prefetched: usize,
+}
+
+const V17_TRACE_OFFSETS: TraceFieldOffsets = TraceFieldOffsets {
+    block_offset: 4,
+    flags: 8,
+    used: 10,
+    prefetched: 11,
+};
+const V30_TRACE_OFFSETS: TraceFieldOffsets = TraceFieldOffsets {
+    block_offset: 0,
+    flags: 4,
+    used: 6,
+    prefetched: 7,
+};
+
+/// Decodes one fixed-size trace-chain entry (`entry.len()` must equal the stride the offsets
+/// were computed for — guaranteed by callers slicing via `.chunks(stride)`).
+fn decode_trace_entry(entry: &[u8], offsets: TraceFieldOffsets) -> Trace {
+    Trace {
+        flags: entry[offsets.flags].into(),
+        block_offset: u32_at_pos(entry, offsets.block_offset),
+        used_bitfield: entry[offsets.used],
+        prefetched_bitfield: entry[offsets.prefetched],
+    }
+}
+
+fn process_trace_chain(
+    file_buffer: &[u8],
+    info: &PrefetchFileInformation,
+    stride: u32,
+    offsets: TraceFieldOffsets,
+) -> ForensicResult<Vec<Trace>> {
+    let trace_array = trace_chain_slice(file_buffer, info, stride)?;
+    Ok(trace_array
+        .chunks(stride as usize)
+        .map(|entry| decode_trace_entry(entry, offsets))
+        .collect())
+}
+
+fn traces_for_dependency(
+    file_buffer: &[u8],
+    info: &PrefetchFileInformation,
+    index: usize,
+    size: usize,
+    stride: u32,
+    offsets: TraceFieldOffsets,
+) -> ForensicResult<Vec<Trace>> {
+    let trace_array = trace_chain_slice(file_buffer, info, stride)?;
+    let stride = stride as usize;
+    checked_entry_range(index, size, stride, trace_array.len())?;
+    let start = index * stride;
+    let end = (index + size) * stride;
+    Ok(trace_array[start..end]
+        .chunks(stride)
+        .map(|entry| decode_trace_entry(entry, offsets))
+        .collect())
+}
+
 pub fn traces_for_dependency_v17(
     file_buffer: &[u8],
     info: &PrefetchFileInformation,
     index: usize,
     size: usize,
 ) -> ForensicResult<Vec<Trace>> {
-    let trace_array = trace_chain_slice(file_buffer, info, 12)?;
-    checked_entry_range(index, size, 12, trace_array.len())?;
-    let mut traces = Vec::with_capacity(size);
-    for i in 0..size {
-        let pos = (index + i) * 12;
-        let entry = &trace_array[pos..];
-        let block_offset = u32_at_pos(entry, 4);
-        let flags = entry[8];
-        traces.push(Trace {
-            flags: flags.into(),
-            block_offset,
-            used_bitfield: entry[10],
-            prefetched_bitfield: entry[11],
-        });
-    }
-    Ok(traces)
+    traces_for_dependency(file_buffer, info, index, size, 12, V17_TRACE_OFFSETS)
 }
 
 pub fn process_trace_chain_v17(
     file_buffer: &[u8],
     info: &PrefetchFileInformation,
 ) -> ForensicResult<Vec<Trace>> {
-    let trace_array = trace_chain_slice(file_buffer, info, 12)?;
-    let mut traces = Vec::with_capacity(info.trace_chain_count as usize);
-    for i in 0..(info.trace_chain_count as usize) {
-        let pos = i * 12;
-        let entry = &trace_array[pos..];
-        let block_offset = u32_at_pos(entry, 4);
-        let flags = entry[8];
-        traces.push(Trace {
-            flags: flags.into(),
-            block_offset,
-            used_bitfield: entry[10],
-            prefetched_bitfield: entry[11],
-        });
-    }
-    Ok(traces)
+    process_trace_chain(file_buffer, info, 12, V17_TRACE_OFFSETS)
 }
+
 pub fn process_trace_chain_v30(
     file_buffer: &[u8],
     info: &PrefetchFileInformation,
 ) -> ForensicResult<Vec<Trace>> {
-    let trace_array = trace_chain_slice(file_buffer, info, 8)?;
-    let mut traces = Vec::with_capacity(info.trace_chain_count as usize);
-    for i in 0..(info.trace_chain_count as usize) {
-        let pos = i * 8;
-        let entry = &trace_array[pos..];
-        let block_offset = u32_at_pos(entry, 0);
-        let flags = entry[4];
-        traces.push(Trace {
-            flags: flags.into(),
-            block_offset,
-            used_bitfield: entry[6],
-            prefetched_bitfield: entry[7],
-        });
-    }
-    Ok(traces)
+    process_trace_chain(file_buffer, info, 8, V30_TRACE_OFFSETS)
 }
+
 pub fn traces_for_dependency_v30(
     file_buffer: &[u8],
     info: &PrefetchFileInformation,
     index: usize,
     size: usize,
 ) -> ForensicResult<Vec<Trace>> {
-    let trace_array = trace_chain_slice(file_buffer, info, 8)?;
-    checked_entry_range(index, size, 8, trace_array.len())?;
-    let mut traces = Vec::with_capacity(size);
-    for i in 0..size {
-        let pos = (index + i) * 8;
-        let entry = &trace_array[pos..];
-        let block_offset = u32_at_pos(entry, 0);
-        let flags = entry[4].into();
-        traces.push(Trace {
-            flags,
-            block_offset,
-            used_bitfield: entry[6],
-            prefetched_bitfield: entry[7],
-        });
-    }
-    Ok(traces)
+    traces_for_dependency(file_buffer, info, index, size, 8, V30_TRACE_OFFSETS)
 }
 
 #[cfg(test)]
@@ -204,6 +216,31 @@ mod tests {
         assert_eq!(traces[0].block_offset, 0x9999);
         assert_eq!(traces[0].used_bitfield, 0x11);
         assert_eq!(traces[0].prefetched_bitfield, 0x22);
+    }
+
+    #[test]
+    fn process_trace_chain_v30_rejects_truncated_buffer() {
+        let info = PrefetchFileInformation {
+            trace_chain_offset: 0,
+            trace_chain_count: 5, // claims 5 entries but the buffer only holds 1
+            ..Default::default()
+        };
+        let buffer = vec![0u8; 8];
+        assert!(process_trace_chain_v30(&buffer, &info).is_err());
+    }
+
+    #[test]
+    fn traces_for_dependency_v30_reads_requested_subrange() {
+        let mut buffer = vec![0u8; 16]; // 2 entries
+        buffer[8..12].copy_from_slice(&0xBBBBu32.to_le_bytes()); // second entry's block_offset
+        let info = PrefetchFileInformation {
+            trace_chain_offset: 0,
+            trace_chain_count: 2,
+            ..Default::default()
+        };
+        let traces = traces_for_dependency_v30(&buffer, &info, 1, 1).unwrap();
+        assert_eq!(traces.len(), 1);
+        assert_eq!(traces[0].block_offset, 0xBBBB);
     }
 
     #[test]

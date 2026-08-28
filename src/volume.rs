@@ -108,19 +108,21 @@ fn parse_ntfs_entries(file_reference: &[u8], header_len: u32) -> ForensicResult<
         "file reference entries",
     )?;
     let file_reference = &file_reference[entries_range];
-    let mut files = Vec::with_capacity(file_reference_count as usize);
-    for pos in (0..(file_reference_count as usize * 8)).step_by(8) {
-        let mft_entry_and_seq = u64_at_pos(file_reference, pos);
-        let mft_entry = mft_entry_and_seq & 0xffffffffffff;
-        if mft_entry == 0 {
-            continue;
-        }
-        let seq_number = (mft_entry_and_seq >> 48) as u16;
-        files.push(NtfsFile {
-            mft_entry,
-            seq_number,
+    let files = (0..(file_reference_count as usize * 8))
+        .step_by(8)
+        .filter_map(|pos| {
+            let mft_entry_and_seq = u64_at_pos(file_reference, pos);
+            let mft_entry = mft_entry_and_seq & 0xffffffffffff;
+            if mft_entry == 0 {
+                return None;
+            }
+            let seq_number = (mft_entry_and_seq >> 48) as u16;
+            Some(NtfsFile {
+                mft_entry,
+                seq_number,
+            })
         })
-    }
+        .collect();
     Ok(files)
 }
 
@@ -202,6 +204,90 @@ mod tests {
     fn parse_ntfs_entries_rejects_buffer_shorter_than_header() {
         let buffer = vec![0u8; 4]; // shorter than the 8-byte v17 header
         assert!(extract_file_references_17(&buffer).is_err());
+    }
+
+    #[test]
+    fn extract_file_references_23_decodes_valid_reference() {
+        // 16-byte header: [4..8) count=1; entries start at byte 16 (vs. byte 8 for the
+        // 8-byte v17 header) — same count-field position, different entry-array start.
+        let mut buffer = vec![0u8; 24];
+        buffer[4..8].copy_from_slice(&1u32.to_le_bytes());
+        let packed: u64 = 0x1111_2222_3333 | (0x0007u64 << 48);
+        buffer[16..24].copy_from_slice(&packed.to_le_bytes());
+        let files = extract_file_references_23(&buffer).unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].mft_entry, 0x1111_2222_3333);
+        assert_eq!(files[0].seq_number, 7);
+    }
+
+    #[test]
+    fn extract_directory_strings_23_decodes_single_string() {
+        // one entry: characters=2 (u16) + utf16 "AB" + NUL terminator (6 bytes) = 8 bytes,
+        // plus 2 trailing padding bytes so the buffer is strictly longer than the entry
+        // (the bounds check below is `>=`, not `>`).
+        let mut buffer = vec![0u8; 10];
+        buffer[0..2].copy_from_slice(&2u16.to_le_bytes());
+        buffer[2..4].copy_from_slice(&0x0041u16.to_le_bytes());
+        buffer[4..6].copy_from_slice(&0x0042u16.to_le_bytes());
+        let strings = extract_directory_strings_23(&buffer, 1).unwrap();
+        assert_eq!(strings, vec!["AB".to_string()]);
+    }
+
+    /// Builds a single volume-information entry (given `stride`) with no NTFS file references
+    /// and no directory strings, plus a trailing "C" device-path string — shared by the
+    /// `volume_info_23`/`_26`/`_30` happy-path tests below, which only differ in `stride`.
+    fn single_entry_volume_buffer(stride: u32) -> (Vec<u8>, PrefetchFileInformation) {
+        let file_refs_offset = stride;
+        let device_path_offset = stride + 16;
+        let mut buffer = vec![0u8; device_path_offset as usize + 2];
+        buffer[0..4].copy_from_slice(&device_path_offset.to_le_bytes());
+        buffer[4..8].copy_from_slice(&2u32.to_le_bytes()); // device path: 2 bytes = 1 UTF-16 unit
+        buffer[8..16].copy_from_slice(&0x1000u64.to_le_bytes()); // creation_time
+        buffer[16..20].copy_from_slice(&0xDEAD_BEEFu32.to_le_bytes()); // serial_number
+        buffer[20..24].copy_from_slice(&file_refs_offset.to_le_bytes());
+        buffer[24..28].copy_from_slice(&16u32.to_le_bytes()); // file references: 16-byte header, count=0
+        buffer[28..32].copy_from_slice(&0u32.to_le_bytes()); // directory_strings_offset = 0
+        buffer[32..36].copy_from_slice(&0u32.to_le_bytes()); // directory_strings_count = 0
+        // file_refs region ([stride..stride+16)) stays all-zero: a valid 16-byte header with count=0
+        let device_path_offset = device_path_offset as usize;
+        buffer[device_path_offset..device_path_offset + 2].copy_from_slice(b"C\0");
+        let info = PrefetchFileInformation {
+            volume_information_offset: 0,
+            volume_information_size: u32::try_from(buffer.len()).unwrap(),
+            volume_count: 1,
+            ..Default::default()
+        };
+        (buffer, info)
+    }
+
+    #[test]
+    fn volume_info_23_decodes_single_entry_with_no_files_or_directories() {
+        let (buffer, info) = single_entry_volume_buffer(104);
+        let volumes = volume_info_23(&buffer, &info).unwrap();
+        assert_eq!(volumes.len(), 1);
+        assert_eq!(volumes[0].device_path, "C");
+        assert_eq!(volumes[0].serial_number, 0xDEAD_BEEF);
+        assert_eq!(volumes[0].creation_time, 0x1000);
+        assert!(volumes[0].file_references.is_empty());
+        assert!(volumes[0].directory_strings.is_empty());
+    }
+
+    #[test]
+    fn volume_info_26_decodes_single_entry_with_no_files_or_directories() {
+        // volume_info_26 delegates straight to volume_info_23, so it shares its 104-byte stride.
+        let (buffer, info) = single_entry_volume_buffer(104);
+        let volumes = volume_info_26(&buffer, &info).unwrap();
+        assert_eq!(volumes.len(), 1);
+        assert_eq!(volumes[0].device_path, "C");
+    }
+
+    #[test]
+    fn volume_info_30_decodes_single_entry_with_no_files_or_directories() {
+        let (buffer, info) = single_entry_volume_buffer(96);
+        let volumes = volume_info_30(&buffer, &info).unwrap();
+        assert_eq!(volumes.len(), 1);
+        assert_eq!(volumes[0].device_path, "C");
+        assert_eq!(volumes[0].serial_number, 0xDEAD_BEEF);
     }
 
     #[test]
