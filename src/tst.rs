@@ -167,3 +167,118 @@ fn rejects_corrupted_huge_offsets_without_panicking() {
     let file = open_in_memory(buffer);
     assert!(read_prefetch_file_no_compressed("bad.pf", file).is_err());
 }
+
+fn fixture(path: &str) -> Vec<u8> {
+    std::fs::read(format!("./artifacts/{path}")).unwrap()
+}
+
+#[test]
+fn every_fixture_parses_without_anomalies() {
+    // The hash in the file name is hexadecimal: parsed as decimal, it used to "mismatch" on
+    // almost every file.
+    for (path, name) in [
+        (
+            "17/C/Windows/Prefetch/CMD.EXE-087B4001.pf",
+            "CMD.EXE-087B4001.pf",
+        ),
+        (
+            "23/C/Windows/Prefetch/NOTEPAD.EXE-D8414F97.pf",
+            "NOTEPAD.EXE-D8414F97.pf",
+        ),
+        (
+            "26/C/Windows/Prefetch/CMD.EXE-4A81B364.pf",
+            "CMD.EXE-4A81B364.pf",
+        ),
+        (
+            "30/C/Windows/Prefetch/CMD.EXE-6D6290C5.pf",
+            "CMD.EXE-6D6290C5.pf",
+        ),
+        (
+            "30/C/Windows/Prefetch/POWERSHELL.EXE-AE8EDC9B.pf",
+            "POWERSHELL.EXE-AE8EDC9B.pf",
+        ),
+    ] {
+        let pf = crate::prefetch::read_prefetch_file(name, open_in_memory(fixture(path))).unwrap();
+        assert!(pf.anomalies.is_empty(), "{name}: {:?}", pf.anomalies);
+    }
+}
+
+#[test]
+fn a_renamed_or_unnamed_file_is_an_anomaly_not_an_error() {
+    use crate::anomaly::PrefetchAnomaly;
+    let bytes = fixture("17/C/Windows/Prefetch/CMD.EXE-087B4001.pf");
+    let pf = crate::prefetch::read_prefetch_file(
+        "EVIL-TOOL.EXE-087B4001.pf",
+        open_in_memory(bytes.clone()),
+    )
+    .unwrap();
+    assert_eq!(
+        pf.anomalies,
+        vec![PrefetchAnomaly::NameMismatch {
+            file_name: "EVIL-TOOL.EXE".into(),
+            embedded: "CMD.EXE".into(),
+        }]
+    );
+    let pf =
+        crate::prefetch::read_prefetch_file("CMD.EXE-DEADBEEF.pf", open_in_memory(bytes.clone()))
+            .unwrap();
+    assert!(matches!(
+        pf.anomalies.as_slice(),
+        [PrefetchAnomaly::HashMismatch {
+            file_name: 0xDEAD_BEEF,
+            embedded: 0x087B_4001
+        }]
+    ));
+    let pf = crate::prefetch::read_prefetch_file("cmd.pf", open_in_memory(bytes)).unwrap();
+    assert!(matches!(
+        pf.anomalies.as_slice(),
+        [PrefetchAnomaly::NoHashInName { .. }]
+    ));
+}
+
+/// A MAM file rebuilt with the CRC flag and a CRC slot (`MAM\x84`), the stored CRC being `crc`
+/// or, when `None`, the right one.
+fn with_crc(mam: &[u8], crc: Option<u32>) -> Vec<u8> {
+    let mut header = mam[0..8].to_vec();
+    header[3] |= 0x80;
+    let data = &mam[8..];
+    let mut hash = crc32fast::Hasher::new();
+    hash.update(&header);
+    hash.update(&[0, 0, 0, 0]);
+    hash.update(data);
+    let crc = crc.unwrap_or_else(|| hash.finalize());
+    let mut out = header;
+    out.extend_from_slice(&crc.to_le_bytes());
+    out.extend_from_slice(data);
+    out
+}
+
+#[test]
+fn a_crc_mismatch_is_kept_and_the_file_still_parses() {
+    use crate::anomaly::PrefetchAnomaly;
+    use forensic_rs::provenance::AnomalyFlags;
+    let mam = fixture("30/C/Windows/Prefetch/RUST_OUT.EXE-5D2C8541.pf");
+    let name = "RUST_OUT.EXE-5D2C8541.pf";
+    let good = read_prefetch_file_compressed(name, open_in_memory(with_crc(&mam, None))).unwrap();
+    assert!(good.anomalies.is_empty(), "{:?}", good.anomalies);
+
+    let bad = read_prefetch_file_compressed(name, open_in_memory(with_crc(&mam, Some(1)))).unwrap();
+    assert_eq!(bad.name, good.name);
+    assert_eq!(bad.run_count, good.run_count);
+    assert!(matches!(
+        bad.anomalies.as_slice(),
+        [PrefetchAnomaly::CrcMismatch { stored: 1, .. }]
+    ));
+    assert_eq!(
+        bad.anomalies[0].flag(),
+        Some(AnomalyFlags::CHECKSUM_MISMATCH)
+    );
+}
+
+#[test]
+fn a_truncated_mam_header_is_an_error_not_a_panic() {
+    assert!(
+        read_prefetch_file_compressed("x.pf", open_in_memory(b"MAM\x04\x10\0\0\0".to_vec()))
+            .is_err()
+    );
+}

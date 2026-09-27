@@ -9,8 +9,9 @@ use forensic_rs::{
 };
 
 use crate::{
+    anomaly::PrefetchAnomaly,
     common::{u32_at_pos, u64_at_pos, utf16_at_offset, PrefetchFile, PrefetchFileInformation},
-    decompress::{decompress, CompressionAlgorithm},
+    decompress::{decompress_bounded, CompressionAlgorithm},
     metrics::*,
     volume::*,
 };
@@ -35,6 +36,8 @@ const PREFETCH_COMPRESS_SIGNATURE: u32 = u32::from_le_bytes([b'M', b'A', b'M', b
 const PREFETC_COMPRESS_SIGNATURE_U8: &[u8] = b"MAM";
 
 /// Reads all prefetch files on the folder C:\Windows\Prefetch.
+///
+/// A file that can't be opened or parsed is left out of the result and only logged.
 ///
 /// ```rust
 /// use forensic_rs::prelude::*;
@@ -66,10 +69,13 @@ pub fn read_prefetch_form_fs(fs: &impl FileSystem) -> ForensicResult<Vec<Prefetc
         if !file_name.ends_with(".pf") {
             continue;
         }
-        // Don't reuse `entry.path`: some `FileSystem` implementations (e.g.
-        // `ChRootFileSystem`) return an already-resolved path from `read_dir`
-        // that isn't valid input for a second `open()` call on the same `fs`.
-        let file = fs.open(prefetch_folder.join(&file_name).as_path())?;
+        let file = match fs.open(entry.path.as_path()) {
+            Ok(file) => file,
+            Err(e) => {
+                forensic_rs::warn!("Cannot open prefetch {}: {}", file_name, e);
+                continue;
+            }
+        };
 
         match read_prefetch_file(&file_name, file) {
             Ok(v) => {
@@ -129,7 +135,6 @@ pub fn read_prefetch_file_compressed(
     file.seek(std::io::SeekFrom::Start(0))?;
     let file_size = file.metadata()?.size;
     if file_size > PREFETCH_SIZE_LIMIT {
-        forensic_rs::warn!("File size is abnormally large");
         return Err(ForensicError::file_size_error(
             "prefetch_file",
             PREFETCH_SIZE_LIMIT,
@@ -138,6 +143,14 @@ pub fn read_prefetch_file_compressed(
     }
     let mut buffer = Vec::with_capacity(4096);
     file.read_to_end(&mut buffer)?;
+    // An 8-byte header, then at least the CRC slot of the compressed data.
+    if buffer.len() < 12 {
+        return Err(ForensicError::buffer_too_small(
+            12,
+            buffer.len(),
+            "compressed prefetch header",
+        ));
+    }
     let header = &buffer[0..8];
     let compressed = &buffer[8..];
     let signature = u32_at_pos(header, 0);
@@ -151,37 +164,43 @@ pub fn read_prefetch_file_compressed(
             format!("Invalid prefetch signature: {}", magic),
         ));
     }
+    // A CRC mismatch is evidence about the file, not a reason to refuse it: the content is still
+    // decompressed and parsed (a damaged payload then fails there), and the mismatch is kept.
+    let mut crc_anomaly = None;
     if crc_ck > 0 {
-        let file_crc = u32_at_pos(compressed, 0);
+        let stored = u32_at_pos(compressed, 0);
         let mut hash = crc32fast::Hasher::new();
         hash.update(header);
         hash.update(&[0, 0, 0, 0]);
         hash.update(&compressed[4..]);
-        let crc32 = hash.finalize();
-        if crc32 != file_crc {
-            forensic_rs::warn!(
-                "Invalid CRC for prefetch {:?}: expected={} obtained={}",
-                artifact_name,
-                file_crc,
-                crc32
-            );
-            return Err(ForensicError::invalid_format(
-                "prefetch",
-                "The CRC of the prefetch does not match",
-            ));
+        let computed = hash.finalize();
+        if computed != stored {
+            crc_anomaly = Some(PrefetchAnomaly::CrcMismatch { stored, computed });
         }
     }
     if u64::from(decompressed_size) > PREFETCH_DECOMPRESSED_SIZE_LIMIT {
-        forensic_rs::warn!("Declared decompressed prefetch size is abnormally large");
         return Err(ForensicError::file_size_error(
             "prefetch_file_decompressed",
             PREFETCH_DECOMPRESSED_SIZE_LIMIT,
             u64::from(decompressed_size),
         ));
     }
+    // With a CRC, the compressed data starts after its 4-byte slot.
+    let payload = if crc_ck > 0 {
+        &compressed[4..]
+    } else {
+        compressed
+    };
     let mut decompressed = Vec::with_capacity(decompressed_size as usize);
-    decompress(compressed, &mut decompressed, compress_algorithm)?;
-    process_prefetch_data(artifact_name, &decompressed)
+    decompress_bounded(
+        payload,
+        &mut decompressed,
+        compress_algorithm,
+        decompressed_size as usize,
+    )?;
+    let mut prefetch = process_prefetch_data(artifact_name, &decompressed)?;
+    prefetch.anomalies.extend(crc_anomaly);
+    Ok(prefetch)
 }
 
 /// Parsers a prefetch file that is not compressed.
@@ -200,7 +219,6 @@ pub fn read_prefetch_file_no_compressed(
     file.seek(std::io::SeekFrom::Start(0))?;
     let file_size = file.metadata()?.size;
     if file_size > PREFETCH_SIZE_LIMIT {
-        forensic_rs::warn!("Prefetch file {} size is abnormally large", artifact_name);
         return Err(ForensicError::file_size_error(
             "prefetch_file",
             PREFETCH_SIZE_LIMIT,
@@ -230,11 +248,12 @@ fn process_prefetch_data(artifact_name: &str, buffer: &[u8]) -> ForensicResult<P
     }
     let executable_name = utf16_at_offset(buffer, 16, 60)?;
     let raw_hash = u32_at_pos(buffer, 76);
-    check_prefetch_info_correct(artifact_name, &executable_name, raw_hash);
+    let anomalies = check_prefetch_info_correct(artifact_name, &executable_name, raw_hash);
 
     let mut prefetch_content = PrefetchFile {
         name: executable_name,
         version,
+        anomalies,
         ..Default::default()
     };
     if version == 17 {
@@ -262,12 +281,20 @@ fn process_prefetch_data(artifact_name: &str, buffer: &[u8]) -> ForensicResult<P
         prefetch_content.last_run_times = info.last_run_times;
         prefetch_content.run_count = info.run_count;
     } else {
-        forensic_rs::warn!("The prefetch version is unknown: {}", version);
         return Err(ForensicError::invalid_format(
             "prefetch",
             format!("The prefetch version is unknown: {}", version),
         ));
     };
+    for metric in &prefetch_content.metrics {
+        if data_file_with_executable_blocks(metric) {
+            prefetch_content
+                .anomalies
+                .push(PrefetchAnomaly::ExecutableBlockInDataFile {
+                    file: metric.file.clone(),
+                });
+        }
+    }
     Ok(prefetch_content)
 }
 
@@ -397,31 +424,46 @@ fn file_information_30(buffer: &[u8]) -> ForensicResult<PrefetchFileInformation>
     file_information_30v2(buffer)
 }
 
-fn check_prefetch_info_correct(artifact_name: &str, executable_name: &str, hash: u32) {
-    if artifact_name.ends_with(".pf") {
-        match extract_hash_ands_signature(artifact_name) {
-            Ok((expected_name, expected_hash)) => {
-                if expected_name != executable_name {
-                    forensic_rs::info!("Invalid prefetch executable name expected={expected_name} found={executable_name}");
-                }
-                if hash != expected_hash {
-                    forensic_rs::info!(
-                        "Invalid prefetch hash expected={expected_hash} found={hash}"
-                    );
-                }
+/// Compares the executable name and path hash stored in the file with the ones in its file name
+/// (`<EXE>-<HASH>.pf`). Only checked for a `.pf` name.
+fn check_prefetch_info_correct(
+    artifact_name: &str,
+    executable_name: &str,
+    hash: u32,
+) -> Vec<PrefetchAnomaly> {
+    let mut anomalies = Vec::new();
+    if !artifact_name.to_ascii_lowercase().ends_with(".pf") {
+        return anomalies;
+    }
+    match extract_hash_and_name(artifact_name) {
+        Some((expected_name, expected_hash)) => {
+            // Both names are the same truncated upper-case form; compare without regard to case
+            // so a tool that lower-cased the file name doesn't look like a rename.
+            if !expected_name.eq_ignore_ascii_case(executable_name) {
+                anomalies.push(PrefetchAnomaly::NameMismatch {
+                    file_name: expected_name.to_string(),
+                    embedded: executable_name.to_string(),
+                });
             }
-            Err(e) => {
-                forensic_rs::info!("{}", e);
+            if hash != expected_hash {
+                anomalies.push(PrefetchAnomaly::HashMismatch {
+                    file_name: expected_hash,
+                    embedded: hash,
+                });
             }
         }
+        None => anomalies.push(PrefetchAnomaly::NoHashInName {
+            file_name: artifact_name.to_string(),
+        }),
     }
+    anomalies
 }
 
-fn extract_hash_ands_signature(mut name: &str) -> ForensicResult<(&str, u32)> {
-    if name.ends_with(".pf") {
-        name = &name[0..name.len() - 3]
-    }
-    name.split_once('-')
-        .map(|v| (v.0, v.1.parse::<u32>().unwrap_or_default()))
-        .ok_or_else(|| ForensicError::invalid_format("prefetch", "Invalid prefetch artifact name"))
+/// `CMD.EXE-087B4001.pf` -> `("CMD.EXE", 0x087B4001)`. The hash is hexadecimal and follows the
+/// last `-`, since executable names can contain dashes themselves.
+fn extract_hash_and_name(name: &str) -> Option<(&str, u32)> {
+    let stem = name.get(..name.len().checked_sub(3)?)?;
+    let (exe, hash) = stem.rsplit_once('-')?;
+    let hash = u32::from_str_radix(hash, 16).ok()?;
+    Some((exe, hash))
 }

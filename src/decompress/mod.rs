@@ -7,12 +7,10 @@ pub use forensic_rs::utils::win::decompress::CompressionAlgorithm;
 
 /// Runs a `forensic_rs` decoder and converts a panic into a `ForensicResult` error.
 ///
-/// `forensic-rs`'s LZNT1/LZ77 decoders index/slice their input directly and are known to panic
-/// (rather than return an error) on truncated or otherwise malformed compressed data — see the
-/// regression tests in this module and `AGENTS.md`'s "trust nothing in forensic-rs blindly"
-/// note. A single corrupted `.pf` file must not be able to abort an entire analysis run, so this
-/// crate treats the foreign decoder as untrusted at the call boundary rather than assuming it's
-/// panic-free. `AssertUnwindSafe` is safe here: on panic, `out_buf` is discarded (the caller
+/// Only for the LZ77 and Xpress-Huffman decoders: they index their input directly and aren't known
+/// to be panic-free on truncated or malformed data yet. LZNT1 is (forensic-rs's
+/// `lznt1::decompress_bounded` checks every read), so it runs unguarded. A single corrupted `.pf`
+/// file must not be able to abort an entire analysis run. `AssertUnwindSafe` is safe here: on panic, `out_buf` is discarded (the caller
 /// receives an `Err`, not the partially-written buffer), so an inconsistent partial write can't
 /// leak into further processing.
 fn run_decoder(decode: impl FnOnce() -> ForensicResult<()>) -> ForensicResult<()> {
@@ -37,6 +35,17 @@ pub fn decompress(
     out_buf: &mut Vec<u8>,
     algorithm: CompressionAlgorithm,
 ) -> ForensicResult<()> {
+    decompress_bounded(in_buf, out_buf, algorithm, usize::MAX)
+}
+
+/// [`decompress`], producing at most `max_out` bytes: more is an error, not a truncated result.
+pub fn decompress_bounded(
+    in_buf: &[u8],
+    out_buf: &mut Vec<u8>,
+    algorithm: CompressionAlgorithm,
+    max_out: usize,
+) -> ForensicResult<()> {
+    let start = out_buf.len();
     match algorithm {
         CompressionAlgorithm::CompressionFormatNone => {
             out_buf.extend_from_slice(in_buf);
@@ -48,7 +57,7 @@ pub fn decompress(
             ))
         }
         CompressionAlgorithm::CompressionFormatLznt1 => {
-            run_decoder(|| lznt1::decompress(in_buf, out_buf))?;
+            lznt1::decompress_bounded(in_buf, out_buf, max_out)?;
         }
         CompressionAlgorithm::CompressionFormatXpress => {
             run_decoder(|| lz77::decompress(in_buf, out_buf))?;
@@ -56,6 +65,14 @@ pub fn decompress(
         CompressionAlgorithm::CompressionFormatXpressHuff => {
             run_decoder(|| xpress_huff::decompress(in_buf, out_buf))?;
         }
+    }
+    let produced = out_buf.len() - start;
+    if produced > max_out {
+        return Err(ForensicError::file_size_error(
+            "prefetch_file_decompressed",
+            max_out as u64,
+            produced as u64,
+        ));
     }
     Ok(())
 }

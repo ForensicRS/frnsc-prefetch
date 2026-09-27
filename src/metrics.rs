@@ -88,7 +88,6 @@ fn metrics_array_stride(
             traces: traces_for_dependency(file_buffer, info, trace_index, trace_size)?,
             blocks_to_prefetch,
         };
-        check_anomaly_in_metrics(&metric);
         metrics.push(metric);
     }
     Ok(metrics)
@@ -140,16 +139,9 @@ pub fn metrics_array_30(
     )
 }
 
-fn check_anomaly_in_metrics(metric: &Metric) {
-    if is_resource(&metric.file) {
-        // ICON
-        if metric.has_executable_block() {
-            forensic_rs::warn!(
-                "The loaded file {} should not have executable blocks",
-                metric.file
-            );
-        }
-    }
+/// A data file (`.NLS`, `.RES`) loaded with executable blocks, which it should never have.
+pub fn data_file_with_executable_blocks(metric: &Metric) -> bool {
+    is_resource(&metric.file) && metric.has_executable_block()
 }
 
 fn is_resource(file: &str) -> bool {

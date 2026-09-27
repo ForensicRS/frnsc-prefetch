@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [Unreleased]
+
+### Added
+
+- `PrefetchAnomaly` and `PrefetchFile::anomalies`: a CRC mismatch, an executable name or path
+  hash that differs from the file name, a file name with no hash, and a data file (`.NLS`,
+  `.RES`) loaded with executable blocks are kept on the parsed file instead of being logged.
+  Only `CrcMismatch` maps to a core `AnomalyFlags` bit (`CHECKSUM_MISMATCH`).
+- `decompress::decompress_bounded`, which refuses output larger than the declared size.
+
+### Fixed
+
+- A MAM file with a bad CRC was rejected outright; it is now decompressed and parsed, with the
+  mismatch kept as `CrcMismatch`. The compressed data of a CRC-flagged file (`MAM\x84`) also
+  started 4 bytes early, at the CRC slot.
+- The path hash in the file name (`CMD.EXE-087B4001.pf`) was parsed as decimal, so almost every
+  file "mismatched"; it is hexadecimal. Names containing `-` are split at the last one.
+- `read_prefetch_file_compressed` sliced its header without checking the length.
+- LZNT1 runs through forensic-rs's panic-free `decompress_bounded`, bounded by the declared size,
+  instead of behind `catch_unwind`; LZ77 and Xpress-Huffman keep the guard.
+- `read_prefetch_form_fs` stops at no file that can't be opened (it aborted the whole batch), and
+  opens the `read_dir` entry path directly now that `ChRootFileSystem` returns its own namespace.
+
 ## [0.14.0] - 27/08/2026
 
 ### Changed

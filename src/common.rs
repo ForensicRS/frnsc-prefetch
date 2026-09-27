@@ -44,6 +44,8 @@ pub struct PrefetchFile {
     pub run_count: u32,
     /// Information about the disks and other volumes
     pub volume: Vec<VolumeInformation>,
+    /// Contradictions found while parsing (CRC, name or hash mismatch, ...).
+    pub anomalies: Vec<crate::anomaly::PrefetchAnomaly>,
 }
 #[derive(Clone, Debug, Default)]
 pub struct PrefetchFileInformation {
@@ -233,15 +235,14 @@ pub fn utf16_at_offset(file_buffer: &[u8], offset: usize, size: usize) -> Forens
         ));
     }
     let end_pos = usize::try_from(end_pos).map_err(|_| {
-        ForensicError::invalid_format(
-            "prefetch",
-            "The utf16 string position overflows usize",
-        )
+        ForensicError::invalid_format("prefetch", "The utf16 string position overflows usize")
     })?;
     let txt = &file_buffer[offset..end_pos];
     let units: Vec<u16> = txt
-        .chunks_exact(2)
-        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|c| u16::from_le_bytes(*c))
         .collect();
     let end = units.iter().position(|&v| v == 0).unwrap_or(units.len());
     Ok(String::from_utf16_lossy(&units[0..end]))
