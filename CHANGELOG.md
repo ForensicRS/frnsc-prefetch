@@ -10,6 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `PrefetchParserFactory` (`windows.prefetch`): prefetch files as pipeline records, one per
+  recorded run time with `@timestamp` = that run, `process.name`, `file.path`,
+  `prefetch.run_count`, `prefetch.run_index` and `prefetch.version`. It reads
+  `C:\Windows\Prefetch`, or every `*.pf` found by name when that folder is absent (a triage
+  collection). A file that can't be read is one `Err` item; a file's anomalies are carried on
+  each of its records (`CHECKSUM_MISMATCH` for a CRC mismatch, every kind by name in
+  `prefetch.anomalies`).
 - `PrefetchAnomaly` and `PrefetchFile::anomalies`: a CRC mismatch, an executable name or path
   hash that differs from the file name, a file name with no hash, and a data file (`.NLS`,
   `.RES`) loaded with executable blocks are kept on the parsed file instead of being logged.
