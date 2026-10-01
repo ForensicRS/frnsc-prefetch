@@ -7,7 +7,9 @@ use forensic_rs::prelude::*;
 use crate::common::PrefetchFile;
 use crate::prefetch::read_prefetch_file;
 
-/// Where Windows keeps prefetch files.
+/// The ForensicArtifacts definition of prefetch files, which this parser reads.
+pub const DEFINITION: &str = "WindowsPrefetchFiles";
+/// Where Windows keeps prefetch files, for a run with no artifact catalog.
 const PREFETCH_DIR: &str = r"C:\Windows\Prefetch";
 /// How deep to search when that folder is absent: enough for `<collection>/<host>/.../prefetch/`.
 const MAX_DEPTH: u32 = 8;
@@ -16,8 +18,12 @@ const MAX_DEPTH: u32 = 8;
 /// before), with `@timestamp` = that run, which is the event itself. A file with no run time yields
 /// one record without a timestamp.
 ///
-/// Files come from `C:\Windows\Prefetch`, or, when that folder is absent (a triage collection),
-/// from every `*.pf` found by name. A file that can't be read is one `Err` item; the others go on.
+/// Files are located through the run's artifact catalog ([`DEFINITION`], with
+/// [`ParseContext::locate_artifact_files`]): at the definition's location, or, on a collection with
+/// its own layout, by its file names (`*.pf`). A run with no catalog falls back to this crate's own
+/// search: `C:\Windows\Prefetch`, then every `*.pf` by name. Every record says which way its file
+/// was found (`artifact.located_by`), and names the definition when the catalog found it. A file
+/// that can't be read is one `Err` item; the others go on.
 /// Contradictions inside a file ([`crate::anomaly::PrefetchAnomaly`]) are carried on each of its
 /// records: `CrcMismatch` as the core `CHECKSUM_MISMATCH` anomaly, every kind by name in
 /// `prefetch.anomalies`.
@@ -34,7 +40,10 @@ impl Default for PrefetchParserFactory {
                 "Windows Prefetch (.pf) files: executable, run count and last run times",
                 env!("CARGO_PKG_VERSION"),
             )
-            .with_artifacts(vec![Artifact::Windows(WindowsArtifacts::Prefetch)]),
+            .with_artifacts(vec![Artifact::Windows(WindowsArtifacts::Prefetch)])
+            .with_requirements(vec![Requirement::Artifact(ArtifactRef::from_static(
+                DEFINITION,
+            ))]),
         }
     }
 }
@@ -45,8 +54,57 @@ impl PrefetchParserFactory {
     }
 }
 
-/// The prefetch files on `fs`, sorted, plus the errors met while listing them.
-fn locate(fs: &dyn FileSystem) -> (Vec<FPathBuf>, Vec<ForensicError>) {
+/// Where the prefetch files of this run are, sorted, with how each was found and whether the
+/// catalog found it, plus the problems met while looking.
+struct Located {
+    files: Vec<(FPathBuf, FoundBy)>,
+    by_catalog: bool,
+    errors: Vec<ForensicError>,
+}
+
+/// Through the run's catalog when it has [`DEFINITION`], else with [`locate`].
+fn locate_for(ctx: &ParseContext<'_>, fs: &dyn FileSystem) -> ForensicResult<Located> {
+    let has_definition = ctx
+        .sources()
+        .catalog()
+        .is_some_and(|catalog| catalog.get(DEFINITION).is_some());
+    if !has_definition {
+        let (paths, errors, found_by) = locate(fs);
+        return Ok(Located {
+            files: paths.into_iter().map(|p| (p, found_by)).collect(),
+            by_catalog: false,
+            errors,
+        });
+    }
+    let located = ctx.locate_artifact_files(&[DEFINITION])?;
+    let mut errors = located.errors;
+    errors.extend(located.unresolved.into_iter().map(|u| {
+        ForensicError::other(
+            "catalog",
+            format!(
+                "{DEFINITION}: source {:?} was not searched: {}",
+                u.source, u.reason
+            ),
+        )
+    }));
+    for note in &located.notes {
+        debug!("windows.prefetch: {DEFINITION}: {note}");
+    }
+    Ok(Located {
+        files: located
+            .files
+            .into_iter()
+            .map(|f| (f.path, f.found_by))
+            .collect(),
+        by_catalog: true,
+        errors,
+    })
+}
+
+/// The prefetch files on `fs`, sorted, the errors met while listing them, and whether they were in
+/// the prefetch folder or found by name. This crate's own search, for a run with no artifact
+/// catalog.
+fn locate(fs: &dyn FileSystem) -> (Vec<FPathBuf>, Vec<ForensicError>, FoundBy) {
     let mut paths = Vec::new();
     let mut errors = Vec::new();
     if let Ok(entries) = fs.read_dir(FPath::new(PREFETCH_DIR)) {
@@ -61,7 +119,7 @@ fn locate(fs: &dyn FileSystem) -> (Vec<FPathBuf>, Vec<ForensicError>) {
         }
         if !paths.is_empty() {
             paths.sort();
-            return (paths, errors);
+            return (paths, errors, FoundBy::Location);
         }
     }
     let opts = WalkOptions::default()
@@ -77,7 +135,7 @@ fn locate(fs: &dyn FileSystem) -> (Vec<FPathBuf>, Vec<ForensicError>) {
         }
     }
     paths.sort();
-    (paths, errors)
+    (paths, errors, FoundBy::FileName)
 }
 
 fn is_pf(path: &FPath) -> bool {
@@ -90,9 +148,10 @@ impl ArtifactParserFactory for PrefetchParserFactory {
         &self.descriptor
     }
 
+    /// A filesystem to search. Deliberately does not search it here: [`Self::open`] would only
+    /// have to walk it again.
     fn can_parse(&self, ctx: &ParseContext<'_>) -> bool {
-        ctx.vfs()
-            .is_some_and(|fs| !locate(fs.as_ref()).0.is_empty())
+        ctx.vfs().is_some()
     }
 
     fn open(&self, ctx: &ParseContext<'_>) -> ForensicResult<ParserRun> {
@@ -102,11 +161,13 @@ impl ArtifactParserFactory for PrefetchParserFactory {
                 CompactString::const_new("PrefetchParserFactory"),
             )
         })?;
-        let (paths, errors) = locate(fs.as_ref());
+        let located = locate_for(ctx, fs.as_ref())?;
+        let definition = located.by_catalog.then_some(DEFINITION);
         let host = ctx.host().to_string();
         let acquisition = ctx.acquisition();
-        let mut out: Vec<ForensicResult<ForensicData>> = errors.into_iter().map(Err).collect();
-        for path in paths {
+        let mut out: Vec<ForensicResult<ForensicData>> =
+            located.errors.into_iter().map(Err).collect();
+        for (path, found_by) in located.files {
             let name = path.as_path().file_name().unwrap_or_default().to_string();
             let parsed = fs
                 .open(path.as_path())
@@ -120,7 +181,13 @@ impl ArtifactParserFactory for PrefetchParserFactory {
                             source.mint(acquisition, Recovery::Allocated)
                         })
                         .into_iter()
-                        .map(Ok),
+                        .map(|mut data| {
+                            data.set(dictionary::ARTIFACT_LOCATED_BY, found_by.as_str());
+                            if let Some(definition) = definition {
+                                data.set(dictionary::ARTIFACT_DEFINITION, definition);
+                            }
+                            Ok(data)
+                        }),
                     );
                 }
                 Err(e) => out.push(Err(e)),
@@ -201,10 +268,38 @@ mod tests {
     use forensic_rs::provenance::AnomalyFlags;
     use forensic_rs::utils::testing::{collect_run, InMemoryVirtualFileSystem};
 
-    use super::PrefetchParserFactory;
+    use super::{PrefetchParserFactory, DEFINITION};
+
+    /// `WindowsPrefetchFiles` as ForensicArtifacts defines it, restated here: this crate can't
+    /// depend on `frnsc-artifacts`, and a pinned copy fails loudly if the definition changes.
+    fn catalog() -> Arc<dyn ArtifactCatalog> {
+        use std::borrow::Cow;
+        let def = ArtifactDefinition {
+            name: Cow::Borrowed(DEFINITION),
+            aliases: Cow::Borrowed(&[]),
+            doc: Cow::Borrowed(""),
+            sources: Cow::Owned(vec![SourceEntry {
+                source: ArtifactSource::File {
+                    paths: Cow::Borrowed(&[Cow::Borrowed(r"%%environ_systemroot%%\Prefetch\*.pf")]),
+                    separator: Separator::Backslash,
+                },
+                supported_os: Cow::Borrowed(&[]),
+            }]),
+            supported_os: Cow::Borrowed(&[Os::Windows]),
+            urls: Cow::Borrowed(&[]),
+        };
+        Arc::new(SliceCatalog::new(vec![def]).unwrap())
+    }
 
     fn run(fs: Arc<dyn FileSystem>) -> Vec<ForensicResult<ForensicData>> {
-        let sources = TriageSources::builder().vfs(fs).build();
+        run_with(TriageSources::builder().vfs(fs).build())
+    }
+
+    fn run_with_catalog(fs: Arc<dyn FileSystem>) -> Vec<ForensicResult<ForensicData>> {
+        run_with(TriageSources::builder().vfs(fs).catalog(catalog()).build())
+    }
+
+    fn run_with(sources: TriageSources) -> Vec<ForensicResult<ForensicData>> {
         let triage = TriageContext::new("HOST", "t");
         let cancellation = CancellationToken::new();
         let ctx = ParseContext::new(&sources, &triage, &cancellation);
@@ -237,7 +332,84 @@ mod tests {
             assert!(r.field(dictionary::TIMESTAMP).is_some());
             assert!(r.field_as_str(dictionary::PROCESS_NAME).is_some());
             assert!(r.field("prefetch.anomalies").is_none());
+            assert_eq!(
+                r.field_as_str(dictionary::ARTIFACT_LOCATED_BY),
+                Some("location")
+            );
+            // No catalog, so no definition matched: none is claimed.
+            assert!(r.field(dictionary::ARTIFACT_DEFINITION).is_none());
         }
+    }
+
+    fn collection() -> Arc<dyn FileSystem> {
+        Arc::new(InMemoryVirtualFileSystem::new().with_file(
+            "host/CopiedFiles/prefetch/CMD.EXE-087B4001.pf",
+            fixture("17/C/Windows/Prefetch/CMD.EXE-087B4001.pf"),
+        ))
+    }
+
+    #[test]
+    fn declares_its_catalog_definition() {
+        let parser = PrefetchParserFactory::new();
+        let declared: Vec<&str> = parser
+            .descriptor()
+            .requirements
+            .iter()
+            .filter_map(|r| match r {
+                Requirement::Artifact(a) => Some(&*a.name),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(declared, vec![DEFINITION]);
+    }
+
+    #[test]
+    fn with_a_catalog_the_prefetch_folder_is_found_at_the_definitions_location() {
+        let fs: Arc<dyn FileSystem> = Arc::new(ChRootFileSystem::new(
+            "./artifacts/30/C",
+            Arc::new(StdVirtualFS::new()),
+        ));
+        let records = run_with_catalog(fs);
+        assert!(records.iter().all(|r| r.is_ok()), "{records:?}");
+        assert!(!records.is_empty());
+        for r in records.iter().map(|r| r.as_ref().unwrap()) {
+            assert_eq!(
+                r.field_as_str(dictionary::ARTIFACT_DEFINITION),
+                Some(DEFINITION)
+            );
+            assert_eq!(
+                r.field_as_str(dictionary::ARTIFACT_LOCATED_BY),
+                Some("location")
+            );
+        }
+    }
+
+    #[test]
+    fn with_a_catalog_a_collection_is_searched_by_the_definitions_file_names() {
+        let records = run_with_catalog(collection());
+        assert!(records.iter().all(|r| r.is_ok()), "{records:?}");
+        assert!(!records.is_empty());
+        for r in records.iter().map(|r| r.as_ref().unwrap()) {
+            assert_eq!(
+                r.field_as_str(dictionary::ARTIFACT_DEFINITION),
+                Some(DEFINITION)
+            );
+            assert_eq!(
+                r.field_as_str(dictionary::ARTIFACT_LOCATED_BY),
+                Some("file_name")
+            );
+        }
+    }
+
+    #[test]
+    fn without_a_catalog_a_collection_is_still_found_by_name() {
+        let records = run(collection());
+        let first = records[0].as_ref().unwrap();
+        assert_eq!(
+            first.field_as_str(dictionary::ARTIFACT_LOCATED_BY),
+            Some("file_name")
+        );
+        assert!(first.field(dictionary::ARTIFACT_DEFINITION).is_none());
     }
 
     #[test]
