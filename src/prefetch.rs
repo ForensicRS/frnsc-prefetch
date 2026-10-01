@@ -16,17 +16,17 @@ use crate::{
     volume::*,
 };
 
-/// Maximum accepted size, in bytes, for a prefetch file read off disk. Real-world Windows `.pf`
-/// files (one per executable, capped at 8 run-time/trace-chain slots) are typically tens to a
-/// few hundred KB even for dependency-heavy executables; 1 MB gives generous headroom above
-/// observed sizes while still bounding worst-case memory use for a single file.
-const PREFETCH_SIZE_LIMIT: u64 = 1_000_000;
+/// Maximum accepted size, in bytes, for a prefetch file read off disk. An executable's `.pf` is
+/// typically tens to a few hundred KB, but the boot trace (`NTOSBOOT-B00DFAAD.pf`) records every
+/// file touched during boot: 1.8 and 2.4 MB on real Windows 7 machines, so a 1 MB cap refused it.
+/// It bounds the memory one file can take, at the same 64 MB as the decompressed content.
+const PREFETCH_SIZE_LIMIT: u64 = PREFETCH_DECOMPRESSED_SIZE_LIMIT;
 /// Maximum accepted *decompressed* size declared in a compressed prefetch file's header. This is
-/// checked before allocating the decompression output buffer: the on-disk size is already bounded
-/// by [`PREFETCH_SIZE_LIMIT`], but `decompressed_size` is an attacker/corruption-controlled `u32`
-/// read from that header, so without this cap a tiny compressed file could declare a
-/// multi-gigabyte decompressed size and trigger a large-allocation attempt before the decompressor
-/// has verified anything. 64 MB is far beyond any real prefetch file's decompressed size.
+/// checked before allocating the decompression output buffer: `decompressed_size` is an
+/// attacker/corruption-controlled `u32` read from that header, so without this cap a tiny
+/// compressed file could declare a multi-gigabyte decompressed size and trigger a
+/// large-allocation attempt before the decompressor has verified anything. 64 MB is far beyond
+/// any real prefetch file's decompressed size.
 const PREFETCH_DECOMPRESSED_SIZE_LIMIT: u64 = 64_000_000;
 /// Signature = MAM
 // Predates this quality pass (forensic-rs 0.14 migration); left as an array literal rather
