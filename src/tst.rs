@@ -92,6 +92,10 @@ fn should_parse_prefetch_v30_powershell() {
     let mut forensic_data = pref.activity();
     let activity = forensic_data.next().unwrap().unwrap();
     println!("Activity: {:?}", activity);
+    assert_eq!(
+        activity.origin,
+        forensic_rs::artifact::Artifact::Windows(forensic_rs::artifact::WindowsArtifacts::Prefetch)
+    );
 }
 
 #[test]
