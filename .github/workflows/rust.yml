@@ -1,46 +1,79 @@
+# Builds this crate on its own against the ForensicRS 0.14 development branches on GitHub.
 name: Rust
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, V14 ]
   pull_request:
-    branches: [ main ]
 
 env:
   CARGO_TERM_COLOR: always
+  FORENSIC_TESTDATA_DIR: ${{ github.workspace }}/.testdata
 
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
 
     - name: Set up Rust
-      uses: actions-rs/toolchain@v1
+      uses: dtolnay/rust-toolchain@stable
       with:
-        toolchain: stable
-        override: true
-
-    - name: Run tests
-      run: cargo test --verbose
-
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v2
-
-    - name: Set up Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: stable
-        override: true
         components: clippy, rustfmt
 
-    - name: cargo fmt --check
+    - name: Use the ForensicRS development branches
+      # forensic-rs 0.14 and its sibling crates are not on crates.io yet. Developers patch them
+      # to their local checkouts in this same (gitignored) file; CI patches them to GitHub.
+      run: |
+        mkdir -p .cargo
+        cat > .cargo/config.toml <<'EOF'
+        [patch.crates-io]
+        forensic-rs = { git = "https://github.com/ForensicRS/forensic-rs", branch = "v14" }
+        EOF
+
+    - uses: Swatinem/rust-cache@v2
+
+    - name: Check out the test corpus
+      uses: actions/checkout@v4
+      with:
+        repository: ForensicRS/forensic-testenv
+        path: .forensic-testenv
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - uses: actions/cache@v4
+      with:
+        path: .testdata
+        key: testdata-${{ hashFiles('.forensic-testenv/manifest/artifacts.toml') }}
+        restore-keys: testdata-
+
+    - name: Fetch test artifacts
+      # A sample that is not on the Hugging Face mirror yet fails to download, and its tests
+      # skip. Once every sample this crate uses is published, drop continue-on-error and set
+      # FORENSIC_TESTDATA_STRICT=1 so a missing sample fails the build.
+      continue-on-error: true
+      run: python .forensic-testenv/tools/fetch.py --crate frnsc-prefetch
+
+    - name: Format
       run: cargo fmt --check
 
-    - name: cargo clippy
+    - name: Clippy
       run: cargo clippy --all-targets --all-features -- -D warnings
+
+    - name: Test
+      run: cargo test --all-targets --all-features
+
+    - name: Doc tests
+      run: cargo test --doc --all-features
+
+    - name: Docs
+      run: cargo doc --no-deps --all-features

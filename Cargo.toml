@@ -15,7 +15,6 @@ crc32fast = "1.3.2"
 forensic-rs = "0.14"
 
 [dev-dependencies]
-# Resolved by the forensic-bootstrap workspace. For CI outside the workspace, switch to the git form
-# (the workspace patches it back to the local copy):
-#   forensic-testdata = { git = "https://github.com/ForensicRS/forensic-testenv", features = ["cases"] }
-forensic-testdata = { workspace = true, features = ["cases"] }
+# Shared test corpus (forensic-testenv). The forensic-bootstrap workspace and the local
+# .cargo/config.toml patch it back to the sibling checkout.
+forensic-testdata = { git = "https://github.com/ForensicRS/forensic-testenv", features = ["cases"] }
