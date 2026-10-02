@@ -248,7 +248,7 @@ mod tests {
         buffer[24..28].copy_from_slice(&16u32.to_le_bytes()); // file references: 16-byte header, count=0
         buffer[28..32].copy_from_slice(&0u32.to_le_bytes()); // directory_strings_offset = 0
         buffer[32..36].copy_from_slice(&0u32.to_le_bytes()); // directory_strings_count = 0
-        // file_refs region ([stride..stride+16)) stays all-zero: a valid 16-byte header with count=0
+                                                             // file_refs region ([stride..stride+16)) stays all-zero: a valid 16-byte header with count=0
         let device_path_offset = device_path_offset as usize;
         buffer[device_path_offset..device_path_offset + 2].copy_from_slice(b"C\0");
         let info = PrefetchFileInformation {
