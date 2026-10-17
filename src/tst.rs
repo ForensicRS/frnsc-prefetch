@@ -114,3 +114,14 @@ fn should_parse_current_prefetches() {
     let _pref = read_prefetch_form_fs(&mut fs).expect("Must read all prefetch from filesystem");
     //println!("{:?}", pref);
 }
+
+#[test]
+fn should_not_hang_on_corrupt_prefetch() {
+    let mut fs = StdVirtualFS::new();
+    let file = fs
+        .open(Path::new(
+            "./artifacts/corrupt/SEARCHPROTOCOLHOST.EXE-AFAD3EF9.pf",
+        ))
+        .unwrap();
+    assert!(read_prefetch_file_compressed("SEARCHPROTOCOLHOST.EXE-AFAD3EF9.pf", file).is_err());
+}
