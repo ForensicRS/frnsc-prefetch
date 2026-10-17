@@ -286,3 +286,14 @@ fn a_truncated_mam_header_is_an_error_not_a_panic() {
             .is_err()
     );
 }
+
+#[test]
+fn rejects_corrupt_xpress_huffman_stream_without_hanging() {
+    let fs = StdVirtualFS::new();
+    let file = fs
+        .open(FPath::new(
+            "./artifacts/corrupt/SEARCHPROTOCOLHOST.EXE-AFAD3EF9.pf",
+        ))
+        .unwrap();
+    assert!(read_prefetch_file_compressed("SEARCHPROTOCOLHOST.EXE-AFAD3EF9.pf", file).is_err());
+}

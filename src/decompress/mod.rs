@@ -199,16 +199,15 @@ mod tests {
     }
 
     #[test]
-    fn dispatches_xpress_huff_handles_truncated_input_without_panicking() {
-        // Too short to hold a real Huffman code-length table. Unlike the LZNT1/LZ77 cases
-        // above, this decoder happens to treat it as a valid (if degenerate) empty stream
-        // rather than erroring — the property under test is just that it doesn't panic.
+    fn dispatches_xpress_huff_rejects_truncated_input_without_panicking() {
+        // Too short to hold the 256-byte Huffman code-length table.
         let truncated = [0u8; 4];
         let mut decoded_value = Vec::new();
-        let _ = decompress(
+        let result = decompress(
             &truncated,
             &mut decoded_value,
             CompressionAlgorithm::CompressionFormatXpressHuff,
         );
+        assert!(result.is_err());
     }
 }
