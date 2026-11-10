@@ -125,3 +125,29 @@ fn should_not_hang_on_corrupt_prefetch() {
         .unwrap();
     assert!(read_prefetch_file_compressed("SEARCHPROTOCOLHOST.EXE-AFAD3EF9.pf", file).is_err());
 }
+
+#[test]
+fn utf16_text_stays_inside_its_bytes() {
+    // Four bytes without a NUL: a transmute to &[u16] kept the length 4 and read 4 bytes on.
+    let buffer = b"A\0B\0C\0D\0";
+    assert_eq!(crate::common::utf16_at_offset(buffer, 0, 4).unwrap(), "AB");
+    assert_eq!(crate::common::utf16_at_offset(buffer, 0, 3).unwrap(), "A");
+}
+
+#[test]
+fn names_are_read_by_their_character_counts() {
+    // Loaded file names and device paths store a count of UTF-16 characters, not bytes.
+    let mut fs = StdVirtualFS::new();
+    for (v, f, volume) in [
+        ("23", "NOTEPAD.EXE-D8414F97.pf", "\\DEVICE\\HARDDISKVOLUME2"),
+        ("17", "CMD.EXE-087B4001.pf", "\\DEVICE\\HARDDISKVOLUME1"),
+    ] {
+        let path = format!("./artifacts/{v}/C/Windows/Prefetch/{f}");
+        let pref = read_prefetch_file_no_compressed(f, fs.open(Path::new(&path)).unwrap()).unwrap();
+        assert_eq!(
+            pref.metrics[0].file,
+            format!("{volume}\\WINDOWS\\SYSTEM32\\NTDLL.DLL")
+        );
+        assert_eq!(pref.volume[0].device_path, volume);
+    }
+}

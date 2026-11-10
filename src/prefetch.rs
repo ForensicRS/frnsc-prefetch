@@ -10,7 +10,7 @@ use forensic_rs::{
 };
 
 use crate::{
-    common::{u32_at_pos, u64_at_pos, PrefetchFile, PrefetchFileInformation},
+    common::{u32_at_pos, u64_at_pos, utf16_until_nul, PrefetchFile, PrefetchFileInformation},
     decompress::{decompress, CompressionAlgorithm},
     metrics::*,
     volume::*,
@@ -190,13 +190,7 @@ fn process_prefetch_data(artifact_name: &str, buffer: &[u8]) -> ForensicResult<P
         return Err(ForensicError::bad_format_str("Invalid prefetch signature"));
     }
     //let file_size = u32::from_le_bytes(buffer[12..16].try_into().unwrap());
-    let name_buffer = &buffer[16..76];
-    let name_buffer: &[u16] = unsafe { std::mem::transmute(name_buffer) };
-    let end = name_buffer
-        .iter()
-        .position(|&v| v == 0)
-        .unwrap_or(name_buffer.len());
-    let executable_name = String::from_utf16_lossy(&name_buffer[0..end]);
+    let executable_name = utf16_until_nul(&buffer[16..76]);
     let raw_hash = u32::from_le_bytes(buffer[76..80].try_into().unwrap());
     check_prefetch_info_correct(artifact_name, &executable_name, raw_hash);
 
