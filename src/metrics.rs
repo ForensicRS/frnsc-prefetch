@@ -151,8 +151,6 @@ fn check_anomaly_in_metrics(metric: &Metric) {
                 "The loaded file {} should not have executable blocks",
                 metric.file
             );
-            println!("{:?}", metric.file);
-            //panic!("The loaded file {} should not have executable blocks", metric.file);
         }
     }
 }
