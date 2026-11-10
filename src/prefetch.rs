@@ -16,7 +16,10 @@ use crate::{
     volume::*,
 };
 
-const PREFETCH_SIZE_LIMIT: u64 = 1_000_000;
+/// The most bytes a prefetch file, or its decompressed content, may have. Real files stay under
+/// 2 MB (the largest seen, an `NTOSBOOT` one, has 1.8 MB); the cap keeps a damaged or crafted
+/// header from reserving gigabytes.
+const PREFETCH_SIZE_LIMIT: u64 = 32 * 1024 * 1024;
 /// Signature = MAM
 const PREFETCH_COMPRESS_SIGNATURE: u32 = u32::from_le_bytes([b'M', b'A', b'M', b'\0']);
 const PREFETC_COMPRESS_SIGNATURE_U8: &[u8] = b"MAM";
@@ -146,6 +149,18 @@ pub fn read_prefetch_file_compressed(
                 "The CRC of the prefetch does not match",
             ));
         }
+    }
+    if u64::from(decompressed_size) > PREFETCH_SIZE_LIMIT {
+        notify_low!(
+            NotificationType::AntiForensicsDetected,
+            "Prefetch {:?} claims an abnormally large decompressed size: {}",
+            artifact_name,
+            decompressed_size
+        );
+        return Err(ForensicError::bad_format_string(format!(
+            "The decompressed size {} is abnormally large",
+            decompressed_size
+        )));
     }
     let mut decompressed = Vec::with_capacity(decompressed_size as usize);
     decompress(compressed, &mut decompressed, compress_algorithm)?;

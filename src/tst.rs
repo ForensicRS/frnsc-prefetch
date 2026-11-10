@@ -151,3 +151,31 @@ fn names_are_read_by_their_character_counts() {
         assert_eq!(pref.volume[0].device_path, volume);
     }
 }
+
+#[test]
+fn prefetch_files_over_one_megabyte_parse() {
+    // vss's NTOSBOOT-B00DFAAD.pf is 1.8 MB; here a real file padded past the old 1,000,000.
+    let mut data =
+        std::fs::read("./artifacts/23/C/Windows/Prefetch/NOTEPAD.EXE-D8414F97.pf").unwrap();
+    data.resize(1_100_000, 0);
+    let path = std::env::temp_dir().join("frnsc-prefetch-large-NOTEPAD.EXE-D8414F97.pf");
+    std::fs::write(&path, &data).unwrap();
+    let file = StdVirtualFS::new().open(&path).unwrap();
+    let pref = read_prefetch_file_no_compressed("NOTEPAD.EXE-D8414F97.pf", file);
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!(pref.unwrap().name, "NOTEPAD.EXE");
+}
+
+#[test]
+fn a_huge_decompressed_size_is_refused() {
+    let mut data =
+        std::fs::read("./artifacts/30/C/Windows/Prefetch/RUST_OUT.EXE-5D2C8541.pf").unwrap();
+    data[4..8].copy_from_slice(&u32::MAX.to_le_bytes());
+    let path = std::env::temp_dir().join("frnsc-prefetch-huge-RUST_OUT.EXE-5D2C8541.pf");
+    std::fs::write(&path, &data).unwrap();
+    let file = StdVirtualFS::new().open(&path).unwrap();
+    let pref = read_prefetch_file_compressed("RUST_OUT.EXE-5D2C8541.pf", file);
+    std::fs::remove_file(&path).unwrap();
+    let err = pref.expect_err("4 GiB is no prefetch file").to_string();
+    assert!(err.contains("decompressed size"), "{err}");
+}
