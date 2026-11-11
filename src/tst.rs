@@ -158,11 +158,9 @@ fn prefetch_files_over_one_megabyte_parse() {
     let mut data =
         std::fs::read("./artifacts/23/C/Windows/Prefetch/NOTEPAD.EXE-D8414F97.pf").unwrap();
     data.resize(1_100_000, 0);
-    let path = std::env::temp_dir().join("frnsc-prefetch-large-NOTEPAD.EXE-D8414F97.pf");
-    std::fs::write(&path, &data).unwrap();
-    let file = StdVirtualFS::new().open(&path).unwrap();
+    let tmp = TempFile::new("large-NOTEPAD.EXE-D8414F97.pf", &data);
+    let file = StdVirtualFS::new().open(&tmp.0).unwrap();
     let pref = read_prefetch_file_no_compressed("NOTEPAD.EXE-D8414F97.pf", file);
-    std::fs::remove_file(&path).unwrap();
     assert_eq!(pref.unwrap().name, "NOTEPAD.EXE");
 }
 
@@ -171,11 +169,28 @@ fn a_huge_decompressed_size_is_refused() {
     let mut data =
         std::fs::read("./artifacts/30/C/Windows/Prefetch/RUST_OUT.EXE-5D2C8541.pf").unwrap();
     data[4..8].copy_from_slice(&u32::MAX.to_le_bytes());
-    let path = std::env::temp_dir().join("frnsc-prefetch-huge-RUST_OUT.EXE-5D2C8541.pf");
-    std::fs::write(&path, &data).unwrap();
-    let file = StdVirtualFS::new().open(&path).unwrap();
+    let tmp = TempFile::new("huge-RUST_OUT.EXE-5D2C8541.pf", &data);
+    let file = StdVirtualFS::new().open(&tmp.0).unwrap();
     let pref = read_prefetch_file_compressed("RUST_OUT.EXE-5D2C8541.pf", file);
-    std::fs::remove_file(&path).unwrap();
     let err = pref.expect_err("4 GiB is no prefetch file").to_string();
     assert!(err.contains("decompressed size"), "{err}");
+}
+
+/// A file in the temp dir, named per process so parallel runs don't collide, removed on drop even if the test fails.
+struct TempFile(std::path::PathBuf);
+
+impl TempFile {
+    fn new(name: &str, data: &[u8]) -> Self {
+        let tmp = Self(
+            std::env::temp_dir().join(format!("frnsc-prefetch-{}-{name}", std::process::id())),
+        );
+        std::fs::write(&tmp.0, data).unwrap();
+        tmp
+    }
+}
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
 }

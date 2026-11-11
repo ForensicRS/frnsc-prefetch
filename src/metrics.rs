@@ -30,9 +30,9 @@ pub fn metrics_array_23(
         let filename_length = u32_at_pos(entry, 16) as usize;
         let flags = u32_at_pos(entry, 20);
         // The length counts UTF-16 characters.
-        let Some(filename) =
-            strings_array.get(filename_offset..filename_offset + filename_length * 2)
-        else {
+        let Some(filename) = strings_array.get(
+            filename_offset..filename_offset.saturating_add(filename_length.saturating_mul(2)),
+        ) else {
             return Err(ForensicError::bad_format_str(
                 "A metrics file name is outside the file name strings",
             ));
@@ -73,9 +73,9 @@ pub fn metrics_array_17(
         let filename_length = u32_at_pos(entry, 12) as usize;
         let flags = u32_at_pos(entry, 16);
         // The length counts UTF-16 characters.
-        let Some(filename) =
-            strings_array.get(filename_offset..filename_offset + filename_length * 2)
-        else {
+        let Some(filename) = strings_array.get(
+            filename_offset..filename_offset.saturating_add(filename_length.saturating_mul(2)),
+        ) else {
             return Err(ForensicError::bad_format_str(
                 "A metrics file name is outside the file name strings",
             ));
@@ -122,9 +122,9 @@ pub fn metrics_array_30(
         let filename_length = u32_at_pos(entry, 16) as usize;
         let flags = u32_at_pos(entry, 20);
         // The length counts UTF-16 characters.
-        let Some(filename) =
-            strings_array.get(filename_offset..filename_offset + filename_length * 2)
-        else {
+        let Some(filename) = strings_array.get(
+            filename_offset..filename_offset.saturating_add(filename_length.saturating_mul(2)),
+        ) else {
             return Err(ForensicError::bad_format_str(
                 "A metrics file name is outside the file name strings",
             ));

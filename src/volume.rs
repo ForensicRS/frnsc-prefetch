@@ -27,7 +27,9 @@ pub fn volume_info_30(
         let pos = i * 96;
         let volume_device_path_offset = u32_at_pos(volume_data, pos);
         let volume_device_path_characters = u32_at_pos(volume_data, pos + 4);
-        if volume_device_path_offset as usize + volume_device_path_characters as usize * 2
+        // The path stores a count of UTF-16 characters.
+        let volume_device_path_size = (volume_device_path_characters as usize).saturating_mul(2);
+        if (volume_device_path_offset as usize).saturating_add(volume_device_path_size)
             > volume_data.len()
         {
             return Err(ForensicError::bad_format_str(
@@ -37,8 +39,7 @@ pub fn volume_info_30(
         let device_path = utf16_at_offset(
             volume_data,
             volume_device_path_offset as usize,
-            // The path stores a count of UTF-16 characters.
-            volume_device_path_characters as usize * 2,
+            volume_device_path_size,
         )?;
         let creation_time = u64_at_pos(volume_data, pos + 8);
         let serial_number = u32_at_pos(volume_data, pos + 16);
@@ -89,7 +90,9 @@ pub fn volume_info_17(
         let pos = i * 40;
         let volume_device_path_offset = u32_at_pos(volume_data, pos);
         let volume_device_path_characters = u32_at_pos(volume_data, pos + 4);
-        if volume_device_path_offset as usize + volume_device_path_characters as usize * 2
+        // The path stores a count of UTF-16 characters.
+        let volume_device_path_size = (volume_device_path_characters as usize).saturating_mul(2);
+        if (volume_device_path_offset as usize).saturating_add(volume_device_path_size)
             > volume_data.len()
         {
             return Err(ForensicError::bad_format_str(
@@ -99,8 +102,7 @@ pub fn volume_info_17(
         let device_path = utf16_at_offset(
             volume_data,
             volume_device_path_offset as usize,
-            // The path stores a count of UTF-16 characters.
-            volume_device_path_characters as usize * 2,
+            volume_device_path_size,
         )?;
         let creation_time = u64_at_pos(volume_data, pos + 8);
         let serial_number = u32_at_pos(volume_data, pos + 16);
@@ -151,7 +153,9 @@ pub fn volume_info_23(
         let pos = i * 104;
         let volume_device_path_offset = u32_at_pos(volume_data, pos);
         let volume_device_path_characters = u32_at_pos(volume_data, pos + 4);
-        if volume_device_path_offset as usize + volume_device_path_characters as usize * 2
+        // The path stores a count of UTF-16 characters.
+        let volume_device_path_size = (volume_device_path_characters as usize).saturating_mul(2);
+        if (volume_device_path_offset as usize).saturating_add(volume_device_path_size)
             > volume_data.len()
         {
             return Err(ForensicError::bad_format_str(
@@ -161,8 +165,7 @@ pub fn volume_info_23(
         let device_path = utf16_at_offset(
             volume_data,
             volume_device_path_offset as usize,
-            // The path stores a count of UTF-16 characters.
-            volume_device_path_characters as usize * 2,
+            volume_device_path_size,
         )?;
         let creation_time = u64_at_pos(volume_data, pos + 8);
         let serial_number = u32_at_pos(volume_data, pos + 16);

@@ -238,17 +238,15 @@ pub struct NtfsFile {
 /// UTF-16LE text up to its first NUL, decoded within `bytes` (an odd last byte is ignored).
 pub fn utf16_until_nul(bytes: &[u8]) -> String {
     let units: Vec<u16> = bytes
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .map(|c| u16::from_le_bytes(*c))
+        .chunks_exact(2)
+        .map(|c| u16::from_le_bytes([c[0], c[1]]))
         .take_while(|&u| u != 0)
         .collect();
     String::from_utf16_lossy(&units)
 }
 
 pub fn utf16_at_offset(file_buffer: &[u8], offset: usize, size: usize) -> ForensicResult<String> {
-    let end_pos = offset + size;
+    let end_pos = offset.saturating_add(size);
     if end_pos > file_buffer.len() {
         return Err(ForensicError::bad_format_str(
             "The utf16 string position is greater than the file buffer",
