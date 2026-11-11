@@ -297,3 +297,22 @@ fn rejects_corrupt_xpress_huffman_stream_without_hanging() {
         .unwrap();
     assert!(read_prefetch_file_compressed("SEARCHPROTOCOLHOST.EXE-AFAD3EF9.pf", file).is_err());
 }
+
+#[test]
+fn names_are_read_by_their_character_counts() {
+    // Loaded file names and device paths store a count of UTF-16 characters, not bytes.
+    let fs = StdVirtualFS::new();
+    for (v, f, volume) in [
+        ("23", "NOTEPAD.EXE-D8414F97.pf", r"\DEVICE\HARDDISKVOLUME2"),
+        ("17", "CMD.EXE-087B4001.pf", r"\DEVICE\HARDDISKVOLUME1"),
+    ] {
+        let path = format!("./artifacts/{v}/C/Windows/Prefetch/{f}");
+        let file = fs.open(FPath::new(&path)).unwrap();
+        let pref = read_prefetch_file_no_compressed(f, file).unwrap();
+        assert_eq!(
+            pref.metrics[0].file,
+            format!(r"{volume}\WINDOWS\SYSTEM32\NTDLL.DLL")
+        );
+        assert_eq!(pref.volume[0].device_path, volume);
+    }
+}

@@ -28,7 +28,9 @@ fn parse_volume_entries(
         let device_path = utf16_at_offset(
             volume_data,
             volume_device_path_offset as usize,
-            volume_device_path_characters as usize,
+            // The path stores a count of UTF-16 characters; saturating keeps an absurd count out
+            // of bounds.
+            (volume_device_path_characters as usize).saturating_mul(2),
         )?;
         let creation_time = u64_at_pos(volume_data, pos + 8);
         let serial_number = u32_at_pos(volume_data, pos + 16);
@@ -241,7 +243,7 @@ mod tests {
         let device_path_offset = stride + 16;
         let mut buffer = vec![0u8; device_path_offset as usize + 2];
         buffer[0..4].copy_from_slice(&device_path_offset.to_le_bytes());
-        buffer[4..8].copy_from_slice(&2u32.to_le_bytes()); // device path: 2 bytes = 1 UTF-16 unit
+        buffer[4..8].copy_from_slice(&1u32.to_le_bytes()); // device path: 1 UTF-16 character
         buffer[8..16].copy_from_slice(&0x1000u64.to_le_bytes()); // creation_time
         buffer[16..20].copy_from_slice(&0xDEAD_BEEFu32.to_le_bytes()); // serial_number
         buffer[20..24].copy_from_slice(&file_refs_offset.to_le_bytes());

@@ -80,7 +80,8 @@ fn metrics_array_stride(
         let file = utf16_at_offset(
             strings_array,
             filename_offset as usize,
-            filename_length as usize,
+            // The length counts UTF-16 characters; saturating keeps an absurd count out of bounds.
+            (filename_length as usize).saturating_mul(2),
         )?;
         let metric = Metric {
             file,
@@ -172,9 +173,9 @@ mod tests {
         // strings array: "A" + NUL (4 bytes)
         let strings = [0x41, 0x00, 0x00, 0x00];
         // entry (20 bytes): trace_index@0, trace_size@4, filename_offset@8=0,
-        // filename_length@12=4, flags@16
+        // filename_length@12=2 (UTF-16 characters, NUL included), flags@16
         let mut entry = [0u8; 20];
-        entry[12..16].copy_from_slice(&4u32.to_le_bytes());
+        entry[12..16].copy_from_slice(&2u32.to_le_bytes());
         let mut buffer = Vec::new();
         buffer.extend_from_slice(&strings); // filename_string_offset = 0, size = 4
         buffer.extend_from_slice(&entry); // metrics_offsets = 4
@@ -213,10 +214,10 @@ mod tests {
         // strings array: "A" + NUL (4 bytes)
         let strings = [0x41, 0x00, 0x00, 0x00];
         // entry (32 bytes): trace_index@0, trace_size@4, blocks_to_prefetch@8,
-        // filename_offset@12=0, filename_length@16=4, flags@20
+        // filename_offset@12=0, filename_length@16=2 (UTF-16 characters), flags@20
         let mut entry = [0u8; 32];
         entry[8..12].copy_from_slice(&7u32.to_le_bytes());
-        entry[16..20].copy_from_slice(&4u32.to_le_bytes());
+        entry[16..20].copy_from_slice(&2u32.to_le_bytes());
         let mut buffer = Vec::new();
         buffer.extend_from_slice(&strings);
         buffer.extend_from_slice(&entry);
@@ -240,7 +241,7 @@ mod tests {
         let strings = [0x41, 0x00, 0x00, 0x00];
         let mut entry = [0u8; 32];
         entry[8..12].copy_from_slice(&9u32.to_le_bytes());
-        entry[16..20].copy_from_slice(&4u32.to_le_bytes());
+        entry[16..20].copy_from_slice(&2u32.to_le_bytes()); // UTF-16 characters
         let mut buffer = Vec::new();
         buffer.extend_from_slice(&strings);
         buffer.extend_from_slice(&entry);
