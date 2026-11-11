@@ -200,9 +200,10 @@ mod tests {
 
     #[test]
     fn dispatches_xpress_huff_rejects_truncated_input_without_panicking() {
-        // Too short to hold the 256-byte Huffman code-length table.
+        // Too short to hold the 256-byte Huffman code-length table. The decoder takes the
+        // expected output size from the capacity and reads nothing for a capacity of 0.
         let truncated = [0u8; 4];
-        let mut decoded_value = Vec::new();
+        let mut decoded_value = Vec::with_capacity(64);
         let result = decompress(
             &truncated,
             &mut decoded_value,
