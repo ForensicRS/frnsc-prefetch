@@ -235,20 +235,24 @@ pub struct NtfsFile {
     pub seq_number: u16,
 }
 
+/// UTF-16LE text up to its first NUL, decoded within `bytes` (an odd last byte is ignored).
+pub fn utf16_until_nul(bytes: &[u8]) -> String {
+    let units: Vec<u16> = bytes
+        .chunks_exact(2)
+        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .take_while(|&u| u != 0)
+        .collect();
+    String::from_utf16_lossy(&units)
+}
+
 pub fn utf16_at_offset(file_buffer: &[u8], offset: usize, size: usize) -> ForensicResult<String> {
-    let end_pos = offset + size;
+    let end_pos = offset.saturating_add(size);
     if end_pos > file_buffer.len() {
         return Err(ForensicError::bad_format_str(
             "The utf16 string position is greater than the file buffer",
         ));
     }
-    let txt = &file_buffer[offset..end_pos];
-    let txt_u16: &[u16] = unsafe { std::mem::transmute(txt) };
-    let end = txt_u16
-        .iter()
-        .position(|&v| v == 0)
-        .unwrap_or(txt_u16.len());
-    let txt = String::from_utf16_lossy(&txt_u16[0..end]);
+    let txt = utf16_until_nul(&file_buffer[offset..end_pos]);
     Ok(txt)
 }
 

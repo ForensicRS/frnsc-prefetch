@@ -125,3 +125,72 @@ fn should_not_hang_on_corrupt_prefetch() {
         .unwrap();
     assert!(read_prefetch_file_compressed("SEARCHPROTOCOLHOST.EXE-AFAD3EF9.pf", file).is_err());
 }
+
+#[test]
+fn utf16_text_stays_inside_its_bytes() {
+    // Four bytes without a NUL: a transmute to &[u16] kept the length 4 and read 4 bytes on.
+    let buffer = b"A\0B\0C\0D\0";
+    assert_eq!(crate::common::utf16_at_offset(buffer, 0, 4).unwrap(), "AB");
+    assert_eq!(crate::common::utf16_at_offset(buffer, 0, 3).unwrap(), "A");
+}
+
+#[test]
+fn names_are_read_by_their_character_counts() {
+    // Loaded file names and device paths store a count of UTF-16 characters, not bytes.
+    let mut fs = StdVirtualFS::new();
+    for (v, f, volume) in [
+        ("23", "NOTEPAD.EXE-D8414F97.pf", "\\DEVICE\\HARDDISKVOLUME2"),
+        ("17", "CMD.EXE-087B4001.pf", "\\DEVICE\\HARDDISKVOLUME1"),
+    ] {
+        let path = format!("./artifacts/{v}/C/Windows/Prefetch/{f}");
+        let pref = read_prefetch_file_no_compressed(f, fs.open(Path::new(&path)).unwrap()).unwrap();
+        assert_eq!(
+            pref.metrics[0].file,
+            format!("{volume}\\WINDOWS\\SYSTEM32\\NTDLL.DLL")
+        );
+        assert_eq!(pref.volume[0].device_path, volume);
+    }
+}
+
+#[test]
+fn prefetch_files_over_one_megabyte_parse() {
+    // vss's NTOSBOOT-B00DFAAD.pf is 1.8 MB; here a real file padded past the old 1,000,000.
+    let mut data =
+        std::fs::read("./artifacts/23/C/Windows/Prefetch/NOTEPAD.EXE-D8414F97.pf").unwrap();
+    data.resize(1_100_000, 0);
+    let tmp = TempFile::new("large-NOTEPAD.EXE-D8414F97.pf", &data);
+    let file = StdVirtualFS::new().open(&tmp.0).unwrap();
+    let pref = read_prefetch_file_no_compressed("NOTEPAD.EXE-D8414F97.pf", file);
+    assert_eq!(pref.unwrap().name, "NOTEPAD.EXE");
+}
+
+#[test]
+fn a_huge_decompressed_size_is_refused() {
+    let mut data =
+        std::fs::read("./artifacts/30/C/Windows/Prefetch/RUST_OUT.EXE-5D2C8541.pf").unwrap();
+    data[4..8].copy_from_slice(&u32::MAX.to_le_bytes());
+    let tmp = TempFile::new("huge-RUST_OUT.EXE-5D2C8541.pf", &data);
+    let file = StdVirtualFS::new().open(&tmp.0).unwrap();
+    let pref = read_prefetch_file_compressed("RUST_OUT.EXE-5D2C8541.pf", file);
+    let err = pref.expect_err("4 GiB is no prefetch file").to_string();
+    assert!(err.contains("decompressed size"), "{err}");
+}
+
+/// A file in the temp dir, named per process so parallel runs don't collide, removed on drop even if the test fails.
+struct TempFile(std::path::PathBuf);
+
+impl TempFile {
+    fn new(name: &str, data: &[u8]) -> Self {
+        let tmp = Self(
+            std::env::temp_dir().join(format!("frnsc-prefetch-{}-{name}", std::process::id())),
+        );
+        std::fs::write(&tmp.0, data).unwrap();
+        tmp
+    }
+}
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}

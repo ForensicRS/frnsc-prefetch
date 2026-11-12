@@ -4,7 +4,7 @@ use forensic_rs::{
 };
 
 use crate::{
-    common::{u32_at_pos, Metric, PrefetchFileInformation},
+    common::{u32_at_pos, utf16_until_nul, Metric, PrefetchFileInformation},
     trace::{traces_for_dependency_v17, traces_for_dependency_v30},
 };
 
@@ -29,13 +29,15 @@ pub fn metrics_array_23(
         let filename_offset = u32_at_pos(entry, 12) as usize;
         let filename_length = u32_at_pos(entry, 16) as usize;
         let flags = u32_at_pos(entry, 20);
-        let filename = &strings_array[filename_offset..filename_offset + filename_length];
-        let name_buffer: &[u16] = unsafe { std::mem::transmute(filename) };
-        let end = name_buffer
-            .iter()
-            .position(|&v| v == 0)
-            .unwrap_or(name_buffer.len());
-        let file = String::from_utf16_lossy(&name_buffer[0..end]);
+        // The length counts UTF-16 characters.
+        let Some(filename) = strings_array.get(
+            filename_offset..filename_offset.saturating_add(filename_length.saturating_mul(2)),
+        ) else {
+            return Err(ForensicError::bad_format_str(
+                "A metrics file name is outside the file name strings",
+            ));
+        };
+        let file = utf16_until_nul(filename);
         let metric = Metric {
             file,
             flags: flags.into(),
@@ -70,13 +72,15 @@ pub fn metrics_array_17(
         let filename_offset = u32_at_pos(entry, 8) as usize;
         let filename_length = u32_at_pos(entry, 12) as usize;
         let flags = u32_at_pos(entry, 16);
-        let filename = &strings_array[filename_offset..filename_offset + filename_length];
-        let name_buffer: &[u16] = unsafe { std::mem::transmute(filename) };
-        let end = name_buffer
-            .iter()
-            .position(|&v| v == 0)
-            .unwrap_or(name_buffer.len());
-        let file = String::from_utf16_lossy(&name_buffer[0..end]);
+        // The length counts UTF-16 characters.
+        let Some(filename) = strings_array.get(
+            filename_offset..filename_offset.saturating_add(filename_length.saturating_mul(2)),
+        ) else {
+            return Err(ForensicError::bad_format_str(
+                "A metrics file name is outside the file name strings",
+            ));
+        };
+        let file = utf16_until_nul(filename);
         let metric = Metric {
             file,
             flags: flags.into(),
@@ -117,13 +121,15 @@ pub fn metrics_array_30(
         let filename_offset = u32_at_pos(entry, 12) as usize;
         let filename_length = u32_at_pos(entry, 16) as usize;
         let flags = u32_at_pos(entry, 20);
-        let filename = &strings_array[filename_offset..filename_offset + filename_length];
-        let name_buffer: &[u16] = unsafe { std::mem::transmute(filename) };
-        let end = name_buffer
-            .iter()
-            .position(|&v| v == 0)
-            .unwrap_or(name_buffer.len());
-        let file = String::from_utf16_lossy(&name_buffer[0..end]);
+        // The length counts UTF-16 characters.
+        let Some(filename) = strings_array.get(
+            filename_offset..filename_offset.saturating_add(filename_length.saturating_mul(2)),
+        ) else {
+            return Err(ForensicError::bad_format_str(
+                "A metrics file name is outside the file name strings",
+            ));
+        };
+        let file = utf16_until_nul(filename);
         let metric = Metric {
             file,
             flags: flags.into(),
@@ -145,8 +151,6 @@ fn check_anomaly_in_metrics(metric: &Metric) {
                 "The loaded file {} should not have executable blocks",
                 metric.file
             );
-            println!("{:?}", metric.file);
-            //panic!("The loaded file {} should not have executable blocks", metric.file);
         }
     }
 }

@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 pub mod common;
 pub mod decompress;
 pub mod metrics;
