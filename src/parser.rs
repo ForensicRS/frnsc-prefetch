@@ -14,6 +14,21 @@ const PREFETCH_DIR: &str = r"C:\Windows\Prefetch";
 /// How deep to search when that folder is absent: enough for `<collection>/<host>/.../prefetch/`.
 const MAX_DEPTH: u32 = 8;
 
+/// The fields of a `windows.prefetch` record: one per recorded run of one prefetch file.
+pub const FIELDS: &[FieldSpec] = &[
+    FieldSpec::required(dictionary::PROCESS_NAME, FieldType::Text),
+    FieldSpec::required(dictionary::EVENT_ACTION, FieldType::Text),
+    FieldSpec::required(dictionary::FILE_PATH, FieldType::Text),
+    FieldSpec::required("prefetch.run_count", FieldType::U64),
+    FieldSpec::required("prefetch.version", FieldType::U64),
+    FieldSpec::required(dictionary::ARTIFACT_LOCATED_BY, FieldType::Text),
+    // Absent, with the run index, on the one record of a file with no run time.
+    FieldSpec::optional(dictionary::TIMESTAMP, FieldType::Date),
+    FieldSpec::optional("prefetch.run_index", FieldType::U64),
+    FieldSpec::optional("prefetch.anomalies", FieldType::Array),
+    FieldSpec::optional(dictionary::ARTIFACT_DEFINITION, FieldType::Text),
+];
+
 /// Emits one [`ForensicData`] per run time a prefetch file records (up to 8 on Windows 8+, 1
 /// before), with `@timestamp` = that run, which is the event itself. A file with no run time yields
 /// one record without a timestamp.
@@ -43,7 +58,8 @@ impl Default for PrefetchParserFactory {
             .with_artifacts(vec![Artifact::from(WindowsArtifacts::Prefetch)])
             .with_requirements(vec![Requirement::Artifact(ArtifactRef::from_static(
                 DEFINITION,
-            ))]),
+            ))])
+            .with_fields(FIELDS),
         }
     }
 }
@@ -263,7 +279,9 @@ mod tests {
     use forensic_rs::dictionary;
     use forensic_rs::prelude::*;
     use forensic_rs::provenance::AnomalyFlags;
-    use forensic_rs::utils::testing::{collect_run, InMemoryVirtualFileSystem};
+    use forensic_rs::utils::testing::{
+        assert_records_conform, collect_run, InMemoryVirtualFileSystem,
+    };
 
     use super::{PrefetchParserFactory, DEFINITION};
 
@@ -302,7 +320,12 @@ mod tests {
         let ctx = ParseContext::new(&sources, &triage, &cancellation);
         let parser = PrefetchParserFactory::new();
         assert!(parser.can_parse(&ctx));
-        collect_run(parser.open(&ctx).unwrap()).unwrap()
+        let items = collect_run(parser.open(&ctx).unwrap()).unwrap();
+        let records: Vec<&ForensicData> = items.iter().filter_map(|r| r.as_ref().ok()).collect();
+        if !records.is_empty() {
+            assert_records_conform(parser.descriptor(), records);
+        }
+        items
     }
 
     fn fixture(path: &str) -> Vec<u8> {
@@ -445,6 +468,20 @@ mod tests {
         );
         // No core bit means "renamed", so none is set.
         assert!(renamed.anomalies().flags().is_empty());
+    }
+
+    #[test]
+    fn a_file_with_no_run_time_is_one_record_without_a_timestamp() {
+        let mut pf = fixture("17/C/Windows/Prefetch/CMD.EXE-087B4001.pf");
+        // The v17 last run time, at 84 + 36.
+        pf[120..128].fill(0);
+        let fs: Arc<dyn FileSystem> =
+            Arc::new(InMemoryVirtualFileSystem::new().with_file("pf/CMD.EXE-087B4001.pf", pf));
+        let records = run(fs);
+        assert_eq!(records.len(), 1, "{records:?}");
+        let record = records[0].as_ref().unwrap();
+        assert!(record.field(dictionary::TIMESTAMP).is_none());
+        assert!(record.field("prefetch.run_index").is_none());
     }
 
     #[test]

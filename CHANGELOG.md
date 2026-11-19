@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Every parser declares its output fields (`ParserDescriptor::with_fields`, a public `FIELDS` const), and the tests check every record against them.
 - `PrefetchParserFactory` (`windows.prefetch`): prefetch files as pipeline records, one per
   recorded run time with `@timestamp` = that run, `process.name`, `file.path`,
   `prefetch.run_count`, `prefetch.run_index` and `prefetch.version`. It reads

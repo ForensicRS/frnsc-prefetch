@@ -2,7 +2,10 @@
 //! forensic-testenv cases, which were read with an independent parser. Skipped when the case is
 //! not fetched (`forensic-testenv/tools/fetch.py --case unizar-bolas-cocido`).
 
+use std::sync::Arc;
+
 use forensic_rs::prelude::*;
+use forensic_rs::utils::testing::{assert_records_conform, collect_run, InMemoryVirtualFileSystem};
 use forensic_testdata::case_or_skip;
 use frnsc_prefetch::prelude::*;
 
@@ -11,6 +14,7 @@ fn unizar_bolas_cocido_prefetch_facts() {
     let case = case_or_skip!("unizar-bolas-cocido");
     let fs = StdVirtualFS::new();
     let mut checked = 0;
+    let mut collection = InMemoryVirtualFileSystem::new();
     for fact in case.facts("prefetch-run") {
         let path = case.fact_path(fact);
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
@@ -32,7 +36,24 @@ fn unizar_bolas_cocido_prefetch_facts() {
         );
         let last = pf.last_run_times.first().map(|t| t.filetime() as i64);
         assert_eq!(last, want["last_run"].as_integer(), "{ctx}");
+        collection.add_file(
+            format!("{}/{name}", fact.machine),
+            std::fs::read(&path).unwrap(),
+        );
         checked += 1;
     }
     assert!(checked > 0, "the case has no prefetch-run facts");
+    factory_records_conform(Arc::new(collection));
+}
+
+/// The pipeline records of the case's prefetch files carry only the declared fields.
+fn factory_records_conform(fs: Arc<dyn FileSystem>) {
+    let sources = TriageSources::builder().vfs(fs).build();
+    let triage = TriageContext::new("HOST", "t");
+    let cancellation = CancellationToken::new();
+    let ctx = ParseContext::new(&sources, &triage, &cancellation);
+    let parser = PrefetchParserFactory::new();
+    let items = collect_run(parser.open(&ctx).unwrap()).unwrap();
+    let records: Vec<&ForensicData> = items.iter().filter_map(|r| r.as_ref().ok()).collect();
+    assert_records_conform(parser.descriptor(), records);
 }
