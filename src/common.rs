@@ -9,7 +9,7 @@ use forensic_rs::{
     field::{Field, Text},
     provenance::{Acquisition, ProvenanceId, ProvenanceStore, Recovery, SourceKey},
     traits::forensic::{IntoActivity, IntoTimeline, TimeContext, TimelineData},
-    utils::time::Filetime,
+    utils::time::ForensicTimestamp,
 };
 
 /// By default blocks will be loaded into executable memory sections
@@ -40,7 +40,7 @@ pub struct PrefetchFile {
     /// List of DLLs/EXEs loaded by the executable
     pub metrics: Vec<Metric>,
     /// Last execution times (max 8)
-    pub last_run_times: Vec<Filetime>,
+    pub last_run_times: Vec<ForensicTimestamp>,
     /// Number of times executed
     pub run_count: u32,
     /// Information about the disks and other volumes
@@ -59,7 +59,7 @@ pub struct PrefetchFileInformation {
     pub volume_information_offset: u32,
     pub volume_count: u32,
     pub volume_information_size: u32,
-    pub last_run_times: Vec<Filetime>,
+    pub last_run_times: Vec<ForensicTimestamp>,
     pub run_count: u32,
 }
 
@@ -381,7 +381,7 @@ impl<'a> Iterator for PrefetchTimelineIterator<'a> {
         }
         data.add_field("prefetch.volume_files", Field::Array(volume_files));
         Some(Ok(TimelineData {
-            time: self.prefetch.last_run_times[actual_pos].into(),
+            time: self.prefetch.last_run_times[actual_pos],
             data,
             time_context: TimeContext::Accessed,
         }))
@@ -404,7 +404,7 @@ impl<'a> Iterator for PrefetchActivityIterator<'a> {
         }
         self.time_pos += 1;
         Some(Ok(ForensicActivity {
-            timestamp: self.prefetch.last_run_times[actual_pos].into(),
+            timestamp: self.prefetch.last_run_times[actual_pos],
             activity: ProgramExecution::new(self.prefetch.executable_path().to_string()).into(),
             user: self
                 .prefetch

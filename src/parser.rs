@@ -224,8 +224,9 @@ fn records(
         let set: Vec<_> = pf
             .last_run_times
             .iter()
-            .filter(|t| t.filetime() != 0)
-            .map(|t| Some(ForensicTimestamp::from(*t)))
+            // An unused slot is a zero FILETIME (1601-01-01), not a run.
+            .filter(|t| **t != ForensicTimestamp::from_win_filetime(0))
+            .map(|t| Some(*t))
             .collect();
         if set.is_empty() {
             vec![None]

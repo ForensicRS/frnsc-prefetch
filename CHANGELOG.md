@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `PrefetchFile::last_run_times` is `Vec<ForensicTimestamp>` (forensic-rs 0.14 drops `Filetime`).
+
 ### Added
 
 - Every parser declares its output fields (`ParserDescriptor::with_fields`, a public `FIELDS` const), and the tests check every record against them.

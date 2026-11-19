@@ -4,7 +4,7 @@ use forensic_rs::{
     core::path::FPath,
     err::{ForensicError, ForensicResult},
     traits::vfs::{FileSystem, VFileType, VirtualFile},
-    utils::time::Filetime,
+    utils::time::ForensicTimestamp,
 };
 
 use crate::{
@@ -310,7 +310,7 @@ fn file_information_17(buffer: &[u8]) -> ForensicResult<PrefetchFileInformation>
         volume_information_offset: u32_at_pos(buffer, 24),
         volume_count: u32_at_pos(buffer, 28),
         volume_information_size: u32_at_pos(buffer, 32),
-        last_run_times: vec![Filetime::new(u64_at_pos(buffer, 36))],
+        last_run_times: vec![ForensicTimestamp::from_win_filetime(u64_at_pos(buffer, 36))],
         run_count: u32_at_pos(buffer, 60),
     })
 }
@@ -328,12 +328,12 @@ fn file_information_23(buffer: &[u8]) -> ForensicResult<PrefetchFileInformation>
         volume_information_offset: u32_at_pos(buffer, 24),
         volume_count: u32_at_pos(buffer, 28),
         volume_information_size: u32_at_pos(buffer, 32),
-        last_run_times: vec![Filetime::new(u64_at_pos(buffer, 44))],
+        last_run_times: vec![ForensicTimestamp::from_win_filetime(u64_at_pos(buffer, 44))],
         run_count: u32_at_pos(buffer, 68),
     })
 }
 
-/// v26 header: instead of a single `last_run_times` entry, up to 8 non-zero `Filetime`s are
+/// v26 header: instead of a single `last_run_times` entry, up to 8 non-zero FILETIMEs are
 /// read from offsets 44..108 (8-byte stride); `run_count` moves to offset 124.
 fn file_information_26(buffer: &[u8]) -> ForensicResult<PrefetchFileInformation> {
     let mut last_run_times = Vec::with_capacity(8);
@@ -342,7 +342,7 @@ fn file_information_26(buffer: &[u8]) -> ForensicResult<PrefetchFileInformation>
         if run_time == 0 {
             continue;
         }
-        last_run_times.push(Filetime::new(run_time));
+        last_run_times.push(ForensicTimestamp::from_win_filetime(run_time));
     }
     Ok(PrefetchFileInformation {
         metrics_offsets: u32_at_pos(buffer, 0),
@@ -368,7 +368,7 @@ fn file_information_30v1(buffer: &[u8]) -> ForensicResult<PrefetchFileInformatio
         if run_time == 0 {
             continue;
         }
-        last_run_times.push(Filetime::new(run_time));
+        last_run_times.push(ForensicTimestamp::from_win_filetime(run_time));
     }
     Ok(PrefetchFileInformation {
         metrics_offsets: u32_at_pos(buffer, 0),
@@ -394,7 +394,7 @@ fn file_information_30v2(buffer: &[u8]) -> ForensicResult<PrefetchFileInformatio
         if run_time == 0 {
             continue;
         }
-        last_run_times.push(Filetime::new(run_time));
+        last_run_times.push(ForensicTimestamp::from_win_filetime(run_time));
     }
     Ok(PrefetchFileInformation {
         metrics_offsets: u32_at_pos(buffer, 0),

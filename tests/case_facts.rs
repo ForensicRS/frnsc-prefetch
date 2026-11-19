@@ -34,7 +34,10 @@ fn unizar_bolas_cocido_prefetch_facts() {
             want["run_count"].as_integer().unwrap(),
             "{ctx}"
         );
-        let last = pf.last_run_times.first().map(|t| t.filetime() as i64);
+        let last = pf
+            .last_run_times
+            .first()
+            .map(|t| t.to_win_filetime().expect("after 1601") as i64);
         assert_eq!(last, want["last_run"].as_integer(), "{ctx}");
         collection.add_file(
             format!("{}/{name}", fact.machine),

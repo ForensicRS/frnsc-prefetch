@@ -7,7 +7,7 @@ use forensic_rs::{
         forensic::{IntoActivity, IntoTimeline},
         vfs::FileSystem,
     },
-    utils::{testing::InMemoryVirtualFileSystem, time::Filetime},
+    utils::{testing::InMemoryVirtualFileSystem, time::ForensicTimestamp},
 };
 use std::sync::Arc;
 
@@ -110,10 +110,22 @@ fn should_parse_prefetch_v30_cmd() {
     //println!("{:?}", pref);
     assert_eq!(4, pref.run_count);
     assert_eq!(4, pref.last_run_times.len());
-    assert_eq!(Filetime::new(133515874611440142), pref.last_run_times[0]); // 5 February 2024 6:17:41
-    assert_eq!(Filetime::new(133515874591645855), pref.last_run_times[1]); // 5 February 2024 6:17:39
-    assert_eq!(Filetime::new(133515561632524658), pref.last_run_times[2]); // 4 February 2024 21:36:03
-    assert_eq!(Filetime::new(133514937170602624), pref.last_run_times[3]); // 4 February 2024 4:15:17
+    assert_eq!(
+        ForensicTimestamp::from_win_filetime(133515874611440142),
+        pref.last_run_times[0]
+    ); // 5 February 2024 6:17:41
+    assert_eq!(
+        ForensicTimestamp::from_win_filetime(133515874591645855),
+        pref.last_run_times[1]
+    ); // 5 February 2024 6:17:39
+    assert_eq!(
+        ForensicTimestamp::from_win_filetime(133515561632524658),
+        pref.last_run_times[2]
+    ); // 4 February 2024 21:36:03
+    assert_eq!(
+        ForensicTimestamp::from_win_filetime(133514937170602624),
+        pref.last_run_times[3]
+    ); // 4 February 2024 4:15:17
 }
 
 #[test]
