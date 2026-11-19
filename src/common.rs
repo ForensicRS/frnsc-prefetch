@@ -412,7 +412,7 @@ impl<'a> Iterator for PrefetchActivityIterator<'a> {
                 .map(|v| v.to_string())
                 .unwrap_or_default(),
             session_id: SessionId::Unknown,
-            origin: Artifact::Windows(WindowsArtifacts::Prefetch),
+            origin: Artifact::from(WindowsArtifacts::Prefetch),
             extras: BTreeMap::new(),
         }))
     }

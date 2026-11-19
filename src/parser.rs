@@ -40,7 +40,7 @@ impl Default for PrefetchParserFactory {
                 "Windows Prefetch (.pf) files: executable, run count and last run times",
                 env!("CARGO_PKG_VERSION"),
             )
-            .with_artifacts(vec![Artifact::Windows(WindowsArtifacts::Prefetch)])
+            .with_artifacts(vec![Artifact::from(WindowsArtifacts::Prefetch)])
             .with_requirements(vec![Requirement::Artifact(ArtifactRef::from_static(
                 DEFINITION,
             ))]),
@@ -226,11 +226,8 @@ fn records(
         .enumerate()
         .map(|(index, run)| {
             let provenance = mint();
-            let mut data = ForensicData::new(
-                host,
-                Artifact::Windows(WindowsArtifacts::Prefetch),
-                provenance,
-            );
+            let mut data =
+                ForensicData::new(host, Artifact::from(WindowsArtifacts::Prefetch), provenance);
             let mut anomalies = Anomalies::empty();
             for detail in pf.anomalies.iter().filter_map(|a| a.detail()) {
                 anomalies.add_detail(detail);

@@ -94,7 +94,7 @@ fn should_parse_prefetch_v30_powershell() {
     println!("Activity: {:?}", activity);
     assert_eq!(
         activity.origin,
-        forensic_rs::artifact::Artifact::Windows(forensic_rs::artifact::WindowsArtifacts::Prefetch)
+        forensic_rs::artifact::Artifact::from(forensic_rs::artifact::WindowsArtifacts::Prefetch)
     );
 }
 
