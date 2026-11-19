@@ -341,6 +341,7 @@ pub struct PrefetchTimelineIterator<'a> {
     prefetch: &'a PrefetchFile,
     time_pos: usize,
     provenance: ProvenanceId,
+    host: String,
 }
 impl<'a> Iterator for PrefetchTimelineIterator<'a> {
     type Item = ForensicResult<TimelineData>;
@@ -350,8 +351,11 @@ impl<'a> Iterator for PrefetchTimelineIterator<'a> {
             return None;
         }
         self.time_pos += 1;
-        let ctx = forensic_rs::context::context();
-        let mut data = ForensicData::new(&ctx.host, ctx.artifact.clone(), self.provenance);
+        let mut data = ForensicData::new(
+            &self.host,
+            WindowsArtifacts::Prefetch.into(),
+            self.provenance,
+        );
         data.add_field(
             FILE_ACCESSED,
             self.prefetch.last_run_times[actual_pos].into(),
@@ -445,13 +449,25 @@ impl<'a> IntoActivity<'a> for PrefetchFile {
         Self: 'a;
 }
 
-impl<'a> IntoTimeline<'a> for &'a PrefetchFile {
-    fn timeline(&'a self) -> Self::IntoIter {
+impl PrefetchFile {
+    /// One timeline event per recorded run time, with `host` as the record's
+    /// `host` field. Prefer this over [`IntoTimeline::timeline`], which has no
+    /// way to know the host and leaves it empty.
+    pub fn timeline_for_host(&self, host: &str) -> PrefetchTimelineIterator<'_> {
         PrefetchTimelineIterator {
             prefetch: self,
             time_pos: 0,
             provenance: mint_provenance(&self.name),
+            host: host.to_string(),
         }
+    }
+}
+
+/// The host is left empty: `IntoTimeline` carries no context. Use
+/// [`PrefetchFile::timeline_for_host`], or the `windows.prefetch` parser.
+impl<'a> IntoTimeline<'a> for &'a PrefetchFile {
+    fn timeline(&'a self) -> Self::IntoIter {
+        self.timeline_for_host("")
     }
 
     type IntoIter
@@ -460,13 +476,11 @@ impl<'a> IntoTimeline<'a> for &'a PrefetchFile {
         Self: 'a;
 }
 
+/// The host is left empty: `IntoTimeline` carries no context. Use
+/// [`PrefetchFile::timeline_for_host`], or the `windows.prefetch` parser.
 impl<'a> IntoTimeline<'a> for PrefetchFile {
     fn timeline(&'a self) -> Self::IntoIter {
-        PrefetchTimelineIterator {
-            prefetch: self,
-            time_pos: 0,
-            provenance: mint_provenance(&self.name),
-        }
+        self.timeline_for_host("")
     }
 
     type IntoIter

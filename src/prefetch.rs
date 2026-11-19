@@ -1,7 +1,6 @@
 use std::io::Read;
 
 use forensic_rs::{
-    artifact::WindowsArtifacts,
     core::path::FPath,
     err::{ForensicError, ForensicResult},
     traits::vfs::{FileSystem, VFileType, VirtualFile},
@@ -47,7 +46,6 @@ const PREFETC_COMPRESS_SIGNATURE_U8: &[u8] = b"MAM";
 /// let _list = read_prefetch_form_fs(&fs).expect("Must read all prefetch from filesystem");
 /// ```
 pub fn read_prefetch_form_fs(fs: &impl FileSystem) -> ForensicResult<Vec<PrefetchFile>> {
-    forensic_rs::context::set_artifact(WindowsArtifacts::Prefetch);
     let prefetch_folder = FPath::new(r"C:\Windows\Prefetch");
     let prefetch_files = match fs.read_dir(prefetch_folder) {
         Ok(v) => v,
