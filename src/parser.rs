@@ -21,11 +21,16 @@ pub const FIELDS: &[FieldSpec] = &[
     FieldSpec::required(dictionary::FILE_PATH, FieldType::Text),
     FieldSpec::required("prefetch.run_count", FieldType::U64),
     FieldSpec::required("prefetch.version", FieldType::U64),
+    // The header's path hash, as the 8 hex digits of the file name.
+    FieldSpec::required("prefetch.hash", FieldType::Text),
     FieldSpec::required(dictionary::ARTIFACT_LOCATED_BY, FieldType::Text),
     // Absent, with the run index, on the one record of a file with no run time.
     FieldSpec::optional(dictionary::TIMESTAMP, FieldType::Date),
     FieldSpec::optional("prefetch.run_index", FieldType::U64),
     FieldSpec::optional("prefetch.anomalies", FieldType::Array),
+    // The loaded file the executable resolved to, as the prefetch file stores it
+    // (`\VOLUME{...}\...` or `\DEVICE\HARDDISKVOLUME<n>\...`). Absent when none did.
+    FieldSpec::optional(dictionary::PROCESS_EXECUTABLE, FieldType::Text),
     FieldSpec::optional(dictionary::ARTIFACT_DEFINITION, FieldType::Text),
 ];
 
@@ -234,6 +239,10 @@ fn records(
             set
         }
     };
+    let executable = pf.executable_path();
+    // `executable_path` falls back to the bare name; that is no path.
+    let executable = (executable != pf.name).then(|| executable.to_string());
+    let hash = format!("{:08X}", pf.hash);
     let names: Vec<Text> = pf
         .anomalies
         .iter()
@@ -262,6 +271,10 @@ fn records(
             data.set(dictionary::FILE_PATH, path.to_string());
             data.set("prefetch.run_count", u64::from(pf.run_count));
             data.set("prefetch.version", u64::from(pf.version));
+            data.set("prefetch.hash", hash.clone());
+            if let Some(executable) = &executable {
+                data.set(dictionary::PROCESS_EXECUTABLE, executable.clone());
+            }
             if !names.is_empty() {
                 data.insert(
                     Text::Borrowed("prefetch.anomalies"),
@@ -353,6 +366,12 @@ mod tests {
             assert!(r.field(dictionary::TIMESTAMP).is_some());
             assert!(r.field_as_str(dictionary::PROCESS_NAME).is_some());
             assert!(r.field("prefetch.anomalies").is_none());
+            // The hash is the file name's, and the executable resolves to a full path.
+            let file = r.field_as_str(dictionary::FILE_PATH).unwrap();
+            let hash = r.field_as_str("prefetch.hash").unwrap();
+            assert!(file.ends_with(&format!("-{hash}.pf")), "{file} {hash}");
+            let exe = r.field_as_str(dictionary::PROCESS_EXECUTABLE).unwrap();
+            assert!(exe.starts_with(r"\VOLUME{"), "{exe}");
             assert_eq!(
                 r.field_as_str(dictionary::ARTIFACT_LOCATED_BY),
                 Some("location")
