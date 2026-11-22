@@ -1,7 +1,10 @@
 use forensic_rs::err::ForensicResult;
 
 use crate::{
-    common::{checked_range, u32_at_pos, utf16_at_offset, Metric, PrefetchFileInformation, Trace},
+    common::{
+        checked_range, u32_at_pos, u64_at_pos, utf16_at_offset, Metric, NtfsFile,
+        PrefetchFileInformation, Trace,
+    },
     trace::{traces_for_dependency_v17, traces_for_dependency_v30},
 };
 
@@ -35,6 +38,18 @@ fn entry_fields_32_stride(entry: &[u8]) -> (usize, usize, u32, u32, u32, u32) {
     )
 }
 
+/// The NTFS file reference at offset 24 of a 32-byte (v23 and later) metric entry; a zero
+/// reference is none.
+fn file_reference_32_stride(entry: &[u8]) -> Option<NtfsFile> {
+    let reference = u64_at_pos(entry, 24);
+    (reference != 0).then(|| NtfsFile::from_reference(reference))
+}
+
+/// A v17 metric entry holds no file reference.
+fn no_file_reference(_entry: &[u8]) -> Option<NtfsFile> {
+    None
+}
+
 /// v17 metric entry layout: 20-byte stride (`trace_index`:u32, `trace_size`:u32,
 /// `filename_offset`:u32, `filename_length`:u32, `flags`:u32). Unlike later versions there is no
 /// separate `blocks_to_prefetch` field — `trace_size` doubles as it.
@@ -59,6 +74,7 @@ fn metrics_array_stride(
     info: &PrefetchFileInformation,
     stride: u32,
     extract_fields: EntryFieldsFn,
+    file_reference: fn(&[u8]) -> Option<NtfsFile>,
     traces_for_dependency: TracesForDependencyFn,
 ) -> ForensicResult<Vec<Metric>> {
     let strings_array = &file_buffer[checked_range(
@@ -88,6 +104,7 @@ fn metrics_array_stride(
             flags: flags.into(),
             traces: traces_for_dependency(file_buffer, info, trace_index, trace_size)?,
             blocks_to_prefetch,
+            file_reference: file_reference(entry),
         };
         metrics.push(metric);
     }
@@ -103,6 +120,7 @@ pub fn metrics_array_23(
         info,
         32,
         entry_fields_32_stride,
+        file_reference_32_stride,
         traces_for_dependency_v17,
     )
 }
@@ -116,6 +134,7 @@ pub fn metrics_array_17(
         info,
         20,
         entry_fields_20_stride,
+        no_file_reference,
         traces_for_dependency_v17,
     )
 }
@@ -136,6 +155,7 @@ pub fn metrics_array_30(
         info,
         32,
         entry_fields_32_stride,
+        file_reference_32_stride,
         traces_for_dependency_v30,
     )
 }
@@ -251,6 +271,27 @@ mod tests {
         assert_eq!(metrics[0].file, "ABC");
         assert_eq!(metrics[0].blocks_to_prefetch, 9);
         assert!(metrics[0].traces.is_empty());
+        assert_eq!(metrics[0].file_reference, None);
+    }
+
+    #[test]
+    fn metrics_array_30_reads_the_file_reference() {
+        let strings = [0x41, 0x00, 0x00, 0x00];
+        let mut entry = [0u8; 32];
+        entry[16..20].copy_from_slice(&1u32.to_le_bytes());
+        entry[24..32].copy_from_slice(&(0x1234_5678_9abcu64 | (7u64 << 48)).to_le_bytes());
+        let mut buffer = Vec::new();
+        buffer.extend_from_slice(&strings);
+        buffer.extend_from_slice(&entry);
+        let info = info_with_strings(4, 1, 0, 4);
+        let metrics = metrics_array_30(&buffer, &info).unwrap();
+        assert_eq!(
+            metrics[0].file_reference,
+            Some(NtfsFile {
+                mft_entry: 0x1234_5678_9abc,
+                seq_number: 7
+            })
+        );
     }
 
     #[test]

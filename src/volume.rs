@@ -122,16 +122,8 @@ fn parse_ntfs_entries(file_reference: &[u8], header_len: u32) -> ForensicResult<
     let files = (0..(file_reference_count as usize * 8))
         .step_by(8)
         .filter_map(|pos| {
-            let mft_entry_and_seq = u64_at_pos(file_reference, pos);
-            let mft_entry = mft_entry_and_seq & 0xffffffffffff;
-            if mft_entry == 0 {
-                return None;
-            }
-            let seq_number = (mft_entry_and_seq >> 48) as u16;
-            Some(NtfsFile {
-                mft_entry,
-                seq_number,
-            })
+            let file = NtfsFile::from_reference(u64_at_pos(file_reference, pos));
+            (file.mft_entry != 0).then_some(file)
         })
         .collect();
     Ok(files)

@@ -250,6 +250,8 @@ fn process_prefetch_data(artifact_name: &str, buffer: &[u8]) -> ForensicResult<P
 
     let mut prefetch_content = PrefetchFile {
         name: executable_name,
+        hash: raw_hash,
+        file_size: u32_at_pos(buffer, 12),
         version,
         anomalies,
         ..Default::default()

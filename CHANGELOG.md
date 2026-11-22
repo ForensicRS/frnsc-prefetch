@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `PrefetchFile::hash` (the path hash in the header) and `PrefetchFile::file_size` (the
+  uncompressed size in the header), and `Metric::file_reference`, the NTFS file reference of each
+  loaded file in format version 23 and later (`None` for 17 or a zero reference), with
+  `NtfsFile::from_reference`. These were read and thrown away. They come from the ys-prefetch-parser
+  fork's `e069d98`.
 - Every parser declares its output fields (`ParserDescriptor::with_fields`, a public `FIELDS` const), and the tests check every record against them.
 - `PrefetchParserFactory` (`windows.prefetch`): prefetch files as pipeline records, one per
   recorded run time with `@timestamp` = that run, `process.name`, `file.path`,
