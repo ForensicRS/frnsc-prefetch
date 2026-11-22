@@ -15,7 +15,7 @@ pub mod prelude {
     pub use crate::common::PrefetchFile;
     pub use crate::parser::PrefetchParserFactory;
     pub use crate::prefetch::{
-        read_prefetch_file, read_prefetch_file_compressed, read_prefetch_file_no_compressed,
-        read_prefetch_form_fs,
+        read_prefetch_bytes, read_prefetch_file, read_prefetch_file_compressed,
+        read_prefetch_file_no_compressed, read_prefetch_form_fs,
     };
 }

@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `read_prefetch_bytes(name, &[u8])`: parses a compressed or uncompressed prefetch file already in
+  memory (carved, or read from an archive) without a `VirtualFile`. The `read_prefetch_file*`
+  functions go through it, and they now stop reading at the size limit even when a file's
+  metadata reports less. From the ys-prefetch-parser fork's `b6e4c32`.
 - `PrefetchFile::hash` (the path hash in the header) and `PrefetchFile::file_size` (the
   uncompressed size in the header), and `Metric::file_reference`, the NTFS file reference of each
   loaded file in format version 23 and later (`None` for 17 or a zero reference), with

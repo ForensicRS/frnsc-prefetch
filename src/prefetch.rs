@@ -102,19 +102,51 @@ pub fn read_prefetch_form_fs(fs: &impl FileSystem) -> ForensicResult<Vec<Prefetc
 /// ```
 pub fn read_prefetch_file(
     artifact_name: &str,
-    mut file: Box<dyn VirtualFile>,
+    file: Box<dyn VirtualFile>,
 ) -> ForensicResult<PrefetchFile> {
-    let mut buffer = [0u8; 64];
-    file.read_exact(&mut buffer)?;
-    if file_is_compressed(&buffer) {
-        read_prefetch_file_compressed(artifact_name, file)
+    read_prefetch_bytes(artifact_name, &read_limited(file)?)
+}
+
+/// Parses a prefetch file already in memory (read by the caller, carved, or taken from an
+/// archive), compressed (`MAM`) or not. `artifact_name` is the file name, used to check the
+/// executable name and hash it carries.
+///
+/// ```rust
+/// use frnsc_prefetch::prelude::*;
+/// let data = std::fs::read("./artifacts/30/C/Windows/Prefetch/RUST_OUT.EXE-5D2C8541.pf").unwrap();
+/// let pf = read_prefetch_bytes("RUST_OUT.EXE-5D2C8541.pf", &data).unwrap();
+/// assert_eq!(pf.name, "RUST_OUT.EXE");
+/// ```
+pub fn read_prefetch_bytes(artifact_name: &str, data: &[u8]) -> ForensicResult<PrefetchFile> {
+    check_file_size(data.len() as u64)?;
+    if data.starts_with(PREFETC_COMPRESS_SIGNATURE_U8) {
+        process_compressed_data(artifact_name, data)
     } else {
-        read_prefetch_file_no_compressed(artifact_name, file)
+        process_prefetch_data(artifact_name, data)
     }
 }
 
-fn file_is_compressed(buffer: &[u8]) -> bool {
-    PREFETC_COMPRESS_SIGNATURE_U8 == &buffer[0..3]
+fn check_file_size(file_size: u64) -> ForensicResult<()> {
+    if file_size > PREFETCH_SIZE_LIMIT {
+        return Err(ForensicError::file_size_error(
+            "prefetch_file",
+            PREFETCH_SIZE_LIMIT,
+            file_size,
+        ));
+    }
+    Ok(())
+}
+
+/// Reads the whole file, refusing one over [`PREFETCH_SIZE_LIMIT`] whatever size its metadata
+/// claims.
+fn read_limited(mut file: Box<dyn VirtualFile>) -> ForensicResult<Vec<u8>> {
+    file.seek(std::io::SeekFrom::Start(0))?;
+    check_file_size(file.metadata()?.size)?;
+    let mut buffer = Vec::with_capacity(4096);
+    file.take(PREFETCH_SIZE_LIMIT + 1)
+        .read_to_end(&mut buffer)?;
+    check_file_size(buffer.len() as u64)?;
+    Ok(buffer)
 }
 
 /// Parsers a prefetch file that is compressed.
@@ -128,19 +160,12 @@ fn file_is_compressed(buffer: &[u8]) -> bool {
 /// ```
 pub fn read_prefetch_file_compressed(
     artifact_name: &str,
-    mut file: Box<dyn VirtualFile>,
+    file: Box<dyn VirtualFile>,
 ) -> ForensicResult<PrefetchFile> {
-    file.seek(std::io::SeekFrom::Start(0))?;
-    let file_size = file.metadata()?.size;
-    if file_size > PREFETCH_SIZE_LIMIT {
-        return Err(ForensicError::file_size_error(
-            "prefetch_file",
-            PREFETCH_SIZE_LIMIT,
-            file_size,
-        ));
-    }
-    let mut buffer = Vec::with_capacity(4096);
-    file.read_to_end(&mut buffer)?;
+    process_compressed_data(artifact_name, &read_limited(file)?)
+}
+
+fn process_compressed_data(artifact_name: &str, buffer: &[u8]) -> ForensicResult<PrefetchFile> {
     // An 8-byte header, then at least the CRC slot of the compressed data.
     if buffer.len() < 12 {
         return Err(ForensicError::buffer_too_small(
@@ -212,20 +237,9 @@ pub fn read_prefetch_file_compressed(
 /// ```
 pub fn read_prefetch_file_no_compressed(
     artifact_name: &str,
-    mut file: Box<dyn VirtualFile>,
+    file: Box<dyn VirtualFile>,
 ) -> ForensicResult<PrefetchFile> {
-    file.seek(std::io::SeekFrom::Start(0))?;
-    let file_size = file.metadata()?.size;
-    if file_size > PREFETCH_SIZE_LIMIT {
-        return Err(ForensicError::file_size_error(
-            "prefetch_file",
-            PREFETCH_SIZE_LIMIT,
-            file_size,
-        ));
-    }
-    let mut buffer = Vec::with_capacity(4096);
-    file.read_to_end(&mut buffer)?;
-    process_prefetch_data(artifact_name, &buffer)
+    process_prefetch_data(artifact_name, &read_limited(file)?)
 }
 
 fn process_prefetch_data(artifact_name: &str, buffer: &[u8]) -> ForensicResult<PrefetchFile> {
