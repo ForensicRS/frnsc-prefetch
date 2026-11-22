@@ -20,8 +20,17 @@ fn parse_volume_entries(
         file_buffer.len(),
         "volume information",
     )?];
-    let mut volumes = Vec::with_capacity(info.volume_count as usize);
-    for i in 0..(info.volume_count as usize) {
+    // The entries open the block: a count they can't fit in is damage, not a reason to read
+    // (or reserve room for) four billion zeroed entries.
+    let entries = checked_range(
+        0,
+        info.volume_count.saturating_mul(stride as u32),
+        volume_data.len(),
+        "volume information array",
+    )?;
+    let volume_count = entries.len() / stride;
+    let mut volumes = Vec::with_capacity(volume_count);
+    for i in 0..volume_count {
         let pos = i * stride;
         let volume_device_path_offset = u32_at_pos(volume_data, pos);
         let volume_device_path_characters = u32_at_pos(volume_data, pos + 4);
@@ -140,13 +149,8 @@ fn extract_directory_strings_23(
     directory_strings: &[u8],
     count: usize,
 ) -> ForensicResult<Vec<String>> {
-    if directory_strings.len() < 2 {
-        return Err(ForensicError::invalid_format(
-            "prefetch",
-            "Invalid buffer size for directory strings",
-        ));
-    }
-    let mut list = Vec::with_capacity(count);
+    // Each string takes at least 4 bytes (its length and a NUL), so the buffer caps the count.
+    let mut list = Vec::with_capacity(count.min(directory_strings.len() / 4));
     let mut pos = 0;
     for _ in 0..count {
         if pos + 2 > directory_strings.len() {
@@ -156,7 +160,7 @@ fn extract_directory_strings_23(
             ));
         }
         let characters = u16_at_pos(directory_strings, pos) as usize;
-        if pos + 4 + (characters * 2) >= directory_strings.len() {
+        if pos + 4 + (characters * 2) > directory_strings.len() {
             return Err(ForensicError::invalid_format(
                 "prefetch",
                 "The Directory String size is greater than the buffer size",
@@ -225,8 +229,7 @@ mod tests {
     #[test]
     fn extract_directory_strings_23_decodes_single_string() {
         // one entry: characters=2 (u16) + utf16 "AB" + NUL terminator (6 bytes) = 8 bytes,
-        // plus 2 trailing padding bytes so the buffer is strictly longer than the entry
-        // (the bounds check below is `>=`, not `>`).
+        // plus 2 trailing padding bytes.
         let mut buffer = vec![0u8; 10];
         buffer[0..2].copy_from_slice(&2u16.to_le_bytes());
         buffer[2..4].copy_from_slice(&0x0041u16.to_le_bytes());
@@ -318,5 +321,37 @@ mod tests {
             ..Default::default()
         };
         assert!(volume_info_17(&buffer, &info).is_err());
+    }
+
+    #[test]
+    fn extract_directory_strings_23_accepts_a_string_ending_at_the_buffer_end() {
+        let mut buffer = vec![0u8; 8];
+        buffer[0..2].copy_from_slice(&2u16.to_le_bytes());
+        buffer[2..4].copy_from_slice(&0x0041u16.to_le_bytes());
+        buffer[4..6].copy_from_slice(&0x0042u16.to_le_bytes());
+        let strings = extract_directory_strings_23(&buffer, 1).unwrap();
+        assert_eq!(strings, vec!["AB".to_string()]);
+    }
+
+    #[test]
+    fn extract_directory_strings_23_accepts_no_strings() {
+        assert!(extract_directory_strings_23(&[], 0).unwrap().is_empty());
+    }
+
+    #[test]
+    fn extract_directory_strings_23_rejects_a_count_the_buffer_cannot_hold() {
+        let buffer = vec![0u8; 8];
+        assert!(extract_directory_strings_23(&buffer, u32::MAX as usize).is_err());
+    }
+
+    #[test]
+    fn volume_info_rejects_a_count_that_does_not_fit_the_block() {
+        // One real entry, but the header claims 0xFFFFFFFF of them: used to reserve room for
+        // all of them and walk them as zeroed entries.
+        let (buffer, mut info) = single_entry_volume_buffer(96);
+        info.volume_count = u32::MAX;
+        assert!(volume_info_30(&buffer, &info).is_err());
+        info.volume_count = 2;
+        assert!(volume_info_30(&buffer, &info).is_err());
     }
 }
