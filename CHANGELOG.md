@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `scca_hash`: the prefetch path hash (`scca_xp_hash` for format 17, `scca_vista_hash` for 23
+  and later, and `path_has_hash`, which also covers `\VOLUME{...}` paths). Written from libscca's
+  format documentation and checked against the file names of the 230 test files: every
+  non-hosted executable's path reproduces its hash.
 - `read_prefetch_bytes(name, &[u8])`: parses a compressed or uncompressed prefetch file already in
   memory (carved, or read from an archive) without a `VirtualFile`. The `read_prefetch_file*`
   functions go through it, and they now stop reading at the size limit even when a file's
@@ -39,6 +43,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `executable_path()` matched any loaded file whose path *ends with* the executable name, so
+  `CMD.EXE` could resolve to `\TOOLS\NOTCMD.EXE`. It also never resolved names Windows truncates
+  to 29 characters in the header. It now compares the whole file name ignoring ASCII case, and
+  resolves a truncated name when exactly one loaded file starts with it (ys-prefetch-parser
+  fork, `8a7b616`). When several loaded files share the name, the one whose path hashes to the
+  header hash wins. An exact name with no single hash match falls back to the first candidate,
+  as before; a truncated one falls back to the name.
 - Every loaded-file path (`Metric::file`) and volume device path came out half as long
   (`\DEVICE\HARDDISKVOLUME2\W`): the stored lengths are UTF-16 characters and were read as
   bytes since the 0.14 port. So `executable_path()` never found the executable (0 of 230 test

@@ -4,6 +4,7 @@ pub mod decompress;
 pub mod metrics;
 pub mod parser;
 pub mod prefetch;
+pub mod scca_hash;
 pub mod trace;
 pub mod volume;
 

@@ -31,6 +31,15 @@ pub const FLAG_BLOCK_FORCE_PREFETCH: u8 = 0x08;
 /// The block will not be prefetched, should be pulled from disk.
 pub const FLAG_BLOCK_DONT_PREFETCH: u8 = 0x01;
 
+/// The header has room for 30 UTF-16 characters of executable name, including the terminating
+/// NUL.
+const MAX_EXECUTABLE_NAME_CHARACTERS: usize = 29;
+
+/// The last component of a `\`-separated path.
+fn file_name(path: &str) -> &str {
+    path.rsplit('\\').next().unwrap_or(path)
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct PrefetchFile {
     /// Prefetch file version
@@ -308,13 +317,55 @@ impl PrefetchFile {
         PrefetchFile::default()
     }
 
+    /// Path of the executable: the loaded file whose name is the executable name, or the
+    /// executable name itself when no loaded file has it.
+    ///
+    /// The whole file name is compared, ignoring ASCII case, so `CMD.EXE` never resolves to
+    /// `\TOOLS\NOTCMD.EXE`. Windows keeps at most 29 characters of the name in the header; a
+    /// truncated name matches loaded files whose names start with it.
+    ///
+    /// When several loaded files match, the one whose path hashes to [`PrefetchFile::hash`] wins
+    /// (see [`crate::scca_hash`]). If none or several do, an exact-name match falls back to the
+    /// first one (the behaviour before the hash check), and a truncated name falls back to the
+    /// name itself, since nothing tells its candidates apart.
     pub fn executable_path(&self) -> &str {
-        for loaded in &self.metrics {
-            if loaded.file.ends_with(&self.name) {
-                return &loaded.file;
-            }
+        let name = self.name.as_str();
+        let exact: Vec<&Metric> = self
+            .metrics
+            .iter()
+            .filter(|m| file_name(&m.file).eq_ignore_ascii_case(name))
+            .collect();
+        if let [only] = exact[..] {
+            return &only.file;
         }
-        &self.name
+        if exact.len() > 1 {
+            return self.only_one_with_hash(&exact).unwrap_or(&exact[0].file);
+        }
+        if name.encode_utf16().count() < MAX_EXECUTABLE_NAME_CHARACTERS {
+            return name;
+        }
+        let upper = name.to_uppercase();
+        let truncated: Vec<&Metric> = self
+            .metrics
+            .iter()
+            .filter(|m| file_name(&m.file).to_uppercase().starts_with(&upper))
+            .collect();
+        match truncated[..] {
+            [] => name,
+            [only] => &only.file,
+            _ => self.only_one_with_hash(&truncated).unwrap_or(name),
+        }
+    }
+
+    /// The path of the one candidate whose path hash is the header's, if exactly one has it.
+    fn only_one_with_hash<'a>(&self, candidates: &[&'a Metric]) -> Option<&'a str> {
+        let mut hashed = candidates
+            .iter()
+            .filter(|m| crate::scca_hash::path_has_hash(self.version, &m.file, self.hash));
+        match (hashed.next(), hashed.next()) {
+            (Some(only), None) => Some(&only.file),
+            _ => None,
+        }
     }
     /// Gets for which user was the program executed. Its not precise.
     pub fn user(&self) -> Option<&str> {
@@ -608,6 +659,95 @@ mod tests {
             prefetch.executable_path(),
             r"\VOLUME{...}\WINDOWS\SYSTEM32\CMD.EXE"
         );
+    }
+
+    fn prefetch_loading(name: &str, files: &[&str]) -> PrefetchFile {
+        PrefetchFile {
+            name: name.into(),
+            metrics: files
+                .iter()
+                .map(|f| Metric {
+                    file: f.to_string(),
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn executable_path_matches_the_whole_file_name() {
+        let pf = prefetch_loading(
+            "CMD.EXE",
+            &[
+                r"\VOLUME{1}\TOOLS\NOTCMD.EXE",
+                r"\VOLUME{1}\WINDOWS\SYSTEM32\CMD.EXE",
+            ],
+        );
+        assert_eq!(pf.executable_path(), r"\VOLUME{1}\WINDOWS\SYSTEM32\CMD.EXE");
+        assert_eq!(
+            prefetch_loading("CMD.EXE", &[r"\VOLUME{1}\X.DLL"]).executable_path(),
+            "CMD.EXE"
+        );
+        assert_eq!(
+            prefetch_loading("cmd.exe", &[r"\VOLUME{1}\WINDOWS\CMD.EXE"]).executable_path(),
+            r"\VOLUME{1}\WINDOWS\CMD.EXE"
+        );
+    }
+
+    #[test]
+    fn executable_path_resolves_unambiguous_truncated_names() {
+        let name = "AM_DELTA_PATCH_1.377.757.0.EX";
+        let path = r"\VOLUME{1}\INSTALL\AM_DELTA_PATCH_1.377.757.0.EXE";
+        assert_eq!(
+            prefetch_loading(name, &[r"\VOLUME{1}\X.DLL", path]).executable_path(),
+            path
+        );
+        let other = r"\VOLUME{1}\INSTALL\AM_DELTA_PATCH_1.377.757.0.EXE.MUI";
+        assert_eq!(
+            prefetch_loading(name, &[path, other]).executable_path(),
+            name
+        );
+        // A name under 29 characters is never treated as truncated.
+        assert_eq!(
+            prefetch_loading("CMD.EX", &[r"\VOLUME{1}\CMD.EXE"]).executable_path(),
+            "CMD.EX"
+        );
+    }
+
+    #[test]
+    fn executable_path_picks_the_same_named_file_with_the_header_hash() {
+        // CMD.EXE-087B4001.pf (Windows XP) hashes \DEVICE\HARDDISKVOLUME1\WINDOWS\SYSTEM32\CMD.EXE.
+        let right = r"\DEVICE\HARDDISKVOLUME1\WINDOWS\SYSTEM32\CMD.EXE";
+        let mut pf = prefetch_loading(
+            "CMD.EXE",
+            &[r"\DEVICE\HARDDISKVOLUME1\TOOLS\CMD.EXE", right],
+        );
+        pf.version = 17;
+        pf.hash = 0x087B4001;
+        assert_eq!(pf.executable_path(), right);
+        // No candidate has the hash: the first one, as before.
+        pf.hash = 0x1234_5678;
+        assert_eq!(
+            pf.executable_path(),
+            r"\DEVICE\HARDDISKVOLUME1\TOOLS\CMD.EXE"
+        );
+    }
+
+    #[test]
+    fn executable_path_hash_check_covers_volume_guid_paths() {
+        // CMD.EXE-D269B812.pf (format 30) names its volume by GUID.
+        let right = r"\VOLUME{01d1217a9c4c6779-8c9f49ec}\WINDOWS\SYSTEM32\CMD.EXE";
+        let mut pf = prefetch_loading(
+            "CMD.EXE",
+            &[
+                r"\VOLUME{01d1217a9c4c6779-8c9f49ec}\WINDOWS\SYSWOW64\CMD.EXE",
+                right,
+            ],
+        );
+        pf.version = 30;
+        pf.hash = 0xD269B812;
+        assert_eq!(pf.executable_path(), right);
     }
 
     #[test]
