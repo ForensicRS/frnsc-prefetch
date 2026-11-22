@@ -8,13 +8,15 @@ Module layout, one concern per file under `src/`:
 - `prefetch.rs` — entry points (`read_prefetch_form_fs`, `read_prefetch_file*`) and per-version header/field-offset parsing.
 - `common.rs` — shared structs (`PrefetchFile`, `Metric`, `Trace`, `VolumeInformation`, ...), byte-reading helpers, and the `IntoTimeline`/`IntoActivity` trait impls that turn a parsed `PrefetchFile` into forensic-rs's `TimelineData`/`ForensicActivity`.
 - `metrics.rs`, `trace.rs`, `volume.rs` — the metrics array, trace chain, and volume-information sub-parsers, one function per prefetch version.
+- `scca_hash.rs` — the prefetch path hash (XP for format 17, Vista for 23+), written from libscca's format documentation; `PrefetchFile::executable_path` uses it to choose between same-named loaded files.
 - `anomaly.rs` — `PrefetchAnomaly`: what a file's structure or file name contradicts (CRC, name, hash, executable blocks in a data file), kept on `PrefetchFile::anomalies`.
 - `decompress/` — dispatches to the compression algorithm a prefetch file's MAM header declares. All three algorithms (LZ77, LZ77+Huffman/Xpress-Huff, and LZNT1) delegate to `forensic_rs::utils::win::decompress`; this crate has no algorithm implementations of its own anymore, only `decompress/mod.rs`'s `CompressionAlgorithm` dispatch (re-exported from forensic-rs) and its regression tests.
 
 ## Build / test
 
 - `cargo build` / `cargo check` — cross-platform, no `cfg(windows)` gating (CI runs `cargo test --verbose` on ubuntu/windows/macos, see `.github/workflows/rust.yml`).
-- `cargo test` — parses real fixture `.pf` files under `./artifacts/<version>/C/Windows/Prefetch/...` (checked into the repo). Most tests open a fixture directly via `StdVirtualFS`; `should_parse_all_prefetchs_from_fs` and the `#[ignore]`d `should_parse_current_prefetches` exercise `read_prefetch_form_fs` instead (see the `ChRootFileSystem` note below). `tests/case_facts.rs` checks real CTF prefetch files against the forensic-testenv case `unizar-bolas-cocido` (skipped unless fetched).
+- `cargo test` — parses real fixture `.pf` files under `./artifacts/<version>/C/Windows/Prefetch/...` (checked into the repo). Most tests open a fixture directly via `StdVirtualFS`; `should_parse_all_prefetchs_from_fs` and the `#[ignore]`d `should_parse_current_prefetches` exercise `read_prefetch_form_fs` instead (see the `ChRootFileSystem` note below). `tests/case_facts.rs` checks real CTF prefetch files against the forensic-testenv case `unizar-bolas-cocido` (skipped unless fetched). `tests/reference_values.rs` checks forensic-testenv prefetch artifacts against values read with dissect.target (regenerate them with dissect when adding a sample; never copy them from this crate's output). `tests/damaged_files.rs` damages testenv samples and asserts no panic and no allocation over the size limit.
+- String lengths in metric and volume entries are UTF-16 *characters*; `utf16_at_offset` takes *bytes*. Passing one as the other halved every path until 0.14's `174a5b3`.
 - `cargo test --doc` — the doctests on `prefetch.rs`'s public functions are the other concrete usage examples; keep them and `README.md`'s code blocks in sync with the real API when either changes.
 
 ## Dependency on forensic-rs

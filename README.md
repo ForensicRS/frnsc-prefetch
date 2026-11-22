@@ -12,6 +12,19 @@ let fs = ChRootFileSystem::new("./artifacts/17/C", Arc::new(StdVirtualFS::new())
 let prefetch_list : <PrefetchFile> = read_prefetch_form_fs(&fs).expect("Must read all prefetch from filesystem");
 ```
 
+### From memory
+
+A carved file, or one read out of an archive, doesn't need a `VirtualFile`:
+
+```rust
+use frnsc_prefetch::prelude::*;
+let data = std::fs::read("./artifacts/30/C/Windows/Prefetch/CMD.EXE-D269B812.pf").unwrap();
+let pf = read_prefetch_bytes("CMD.EXE-D269B812.pf", &data).unwrap();
+assert_eq!(pf.hash, 0xD269B812); // the path hash, as in the file name
+// The loaded file the executable resolved to (by name, then by path hash when several match).
+assert!(pf.executable_path().ends_with(r"\WINDOWS\SYSTEM32\CMD.EXE"));
+```
+
 ### Into Timeline
 
 A PrefetchFile structure can be converted into [*TimelineData*](https://github.com/ForensicRS/forensic-rs/blob/main/src/traits/forensic.rs) be carefull as a single prefetch can be larger than 45Kb and in the process some data is lost like the MFT file references or the file traces.
