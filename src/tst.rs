@@ -32,7 +32,12 @@ fn should_parse_prefetch_v17() {
         ))
         .unwrap();
     let a = read_prefetch_file_no_compressed("CMD.EXE-087B4001.pf", file).unwrap();
-    println!("{:?}", a);
+    // Name lengths are UTF-16 characters: read as bytes, every path came out half as long.
+    assert_eq!(
+        a.executable_path(),
+        r"\DEVICE\HARDDISKVOLUME1\WINDOWS\SYSTEM32\CMD.EXE"
+    );
+    assert_eq!(a.volume[0].device_path, r"\DEVICE\HARDDISKVOLUME1");
 }
 #[test]
 fn should_parse_prefetch_v30_2() {
@@ -52,7 +57,16 @@ fn should_parse_prefetch_v30() {
             "./artifacts/30/C/Windows/Prefetch/CMD.EXE-D269B812.pf",
         ))
         .unwrap();
-    read_prefetch_file_compressed("CMD.EXE-D269B812.pf", file).unwrap();
+    let pf = read_prefetch_file_compressed("CMD.EXE-D269B812.pf", file).unwrap();
+    assert!(
+        pf.executable_path().ends_with(r"\WINDOWS\SYSTEM32\CMD.EXE"),
+        "{}",
+        pf.executable_path()
+    );
+    assert_eq!(
+        pf.volume[0].device_path,
+        r"\VOLUME{01d12173f395296c-66f451bc}"
+    );
 }
 
 #[test]

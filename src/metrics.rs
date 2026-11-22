@@ -170,19 +170,19 @@ mod tests {
 
     #[test]
     fn metrics_array_17_decodes_single_entry() {
-        // strings array: "A" + NUL (4 bytes)
-        let strings = [0x41, 0x00, 0x00, 0x00];
+        // strings array: "ABC" + NUL (8 bytes)
+        let strings = [0x41, 0x00, 0x42, 0x00, 0x43, 0x00, 0x00, 0x00];
         // entry (20 bytes): trace_index@0, trace_size@4, filename_offset@8=0,
-        // filename_length@12=2 (UTF-16 characters, NUL included), flags@16
+        // filename_length@12=3 (characters, not bytes), flags@16
         let mut entry = [0u8; 20];
-        entry[12..16].copy_from_slice(&2u32.to_le_bytes());
+        entry[12..16].copy_from_slice(&3u32.to_le_bytes());
         let mut buffer = Vec::new();
-        buffer.extend_from_slice(&strings); // filename_string_offset = 0, size = 4
-        buffer.extend_from_slice(&entry); // metrics_offsets = 4
-        let info = info_with_strings(4, 1, 0, 4);
+        buffer.extend_from_slice(&strings); // filename_string_offset = 0, size = 8
+        buffer.extend_from_slice(&entry); // metrics_offsets = 8
+        let info = info_with_strings(8, 1, 0, 8);
         let metrics = metrics_array_17(&buffer, &info).unwrap();
         assert_eq!(metrics.len(), 1);
-        assert_eq!(metrics[0].file, "A");
+        assert_eq!(metrics[0].file, "ABC");
     }
 
     #[test]
@@ -211,20 +211,20 @@ mod tests {
 
     #[test]
     fn metrics_array_26_decodes_single_entry() {
-        // strings array: "A" + NUL (4 bytes)
-        let strings = [0x41, 0x00, 0x00, 0x00];
+        // strings array: "ABC" + NUL (8 bytes)
+        let strings = [0x41, 0x00, 0x42, 0x00, 0x43, 0x00, 0x00, 0x00];
         // entry (32 bytes): trace_index@0, trace_size@4, blocks_to_prefetch@8,
-        // filename_offset@12=0, filename_length@16=2 (UTF-16 characters), flags@20
+        // filename_offset@12=0, filename_length@16=3 (characters, not bytes), flags@20
         let mut entry = [0u8; 32];
         entry[8..12].copy_from_slice(&7u32.to_le_bytes());
-        entry[16..20].copy_from_slice(&2u32.to_le_bytes());
+        entry[16..20].copy_from_slice(&3u32.to_le_bytes());
         let mut buffer = Vec::new();
         buffer.extend_from_slice(&strings);
         buffer.extend_from_slice(&entry);
-        let info = info_with_strings(4, 1, 0, 4);
+        let info = info_with_strings(8, 1, 0, 8);
         let metrics = metrics_array_26(&buffer, &info).unwrap();
         assert_eq!(metrics.len(), 1);
-        assert_eq!(metrics[0].file, "A");
+        assert_eq!(metrics[0].file, "ABC");
         assert_eq!(metrics[0].blocks_to_prefetch, 7);
         assert!(metrics[0].traces.is_empty());
     }
@@ -238,17 +238,17 @@ mod tests {
 
     #[test]
     fn metrics_array_30_decodes_single_entry() {
-        let strings = [0x41, 0x00, 0x00, 0x00];
+        let strings = [0x41, 0x00, 0x42, 0x00, 0x43, 0x00, 0x00, 0x00];
         let mut entry = [0u8; 32];
         entry[8..12].copy_from_slice(&9u32.to_le_bytes());
-        entry[16..20].copy_from_slice(&2u32.to_le_bytes()); // UTF-16 characters
+        entry[16..20].copy_from_slice(&3u32.to_le_bytes());
         let mut buffer = Vec::new();
         buffer.extend_from_slice(&strings);
         buffer.extend_from_slice(&entry);
-        let info = info_with_strings(4, 1, 0, 4);
+        let info = info_with_strings(8, 1, 0, 8);
         let metrics = metrics_array_30(&buffer, &info).unwrap();
         assert_eq!(metrics.len(), 1);
-        assert_eq!(metrics[0].file, "A");
+        assert_eq!(metrics[0].file, "ABC");
         assert_eq!(metrics[0].blocks_to_prefetch, 9);
         assert!(metrics[0].traces.is_empty());
     }

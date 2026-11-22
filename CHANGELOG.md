@@ -30,6 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Every loaded-file path (`Metric::file`) and volume device path came out half as long
+  (`\DEVICE\HARDDISKVOLUME2\W`): the stored lengths are UTF-16 characters and were read as
+  bytes since the 0.14 port. So `executable_path()` never found the executable (0 of 230 test
+  files; now 213), `user()` never matched, and the pipeline's `file.path` was truncated. Reads
+  the lengths as characters, as the ys-prefetch-parser fork's `8ac023a` does.
 - A MAM file with a bad CRC was rejected outright; it is now decompressed and parsed, with the
   mismatch kept as `CrcMismatch`. The compressed data of a CRC-flagged file (`MAM\x84`) also
   started 4 bytes early, at the CRC slot.

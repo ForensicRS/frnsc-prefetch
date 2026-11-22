@@ -236,14 +236,14 @@ mod tests {
     }
 
     /// Builds a single volume-information entry (given `stride`) with no NTFS file references
-    /// and no directory strings, plus a trailing "C" device-path string — shared by the
+    /// and no directory strings, plus a trailing "C:" device-path string — shared by the
     /// `volume_info_23`/`_26`/`_30` happy-path tests below, which only differ in `stride`.
     fn single_entry_volume_buffer(stride: u32) -> (Vec<u8>, PrefetchFileInformation) {
         let file_refs_offset = stride;
         let device_path_offset = stride + 16;
-        let mut buffer = vec![0u8; device_path_offset as usize + 2];
+        let mut buffer = vec![0u8; device_path_offset as usize + 6];
         buffer[0..4].copy_from_slice(&device_path_offset.to_le_bytes());
-        buffer[4..8].copy_from_slice(&1u32.to_le_bytes()); // device path: 1 UTF-16 character
+        buffer[4..8].copy_from_slice(&2u32.to_le_bytes()); // device path: 2 UTF-16 characters
         buffer[8..16].copy_from_slice(&0x1000u64.to_le_bytes()); // creation_time
         buffer[16..20].copy_from_slice(&0xDEAD_BEEFu32.to_le_bytes()); // serial_number
         buffer[20..24].copy_from_slice(&file_refs_offset.to_le_bytes());
@@ -252,7 +252,7 @@ mod tests {
         buffer[32..36].copy_from_slice(&0u32.to_le_bytes()); // directory_strings_count = 0
                                                              // file_refs region ([stride..stride+16)) stays all-zero: a valid 16-byte header with count=0
         let device_path_offset = device_path_offset as usize;
-        buffer[device_path_offset..device_path_offset + 2].copy_from_slice(b"C\0");
+        buffer[device_path_offset..device_path_offset + 6].copy_from_slice(b"C\0:\0\0\0");
         let info = PrefetchFileInformation {
             volume_information_offset: 0,
             volume_information_size: u32::try_from(buffer.len()).unwrap(),
@@ -267,7 +267,7 @@ mod tests {
         let (buffer, info) = single_entry_volume_buffer(104);
         let volumes = volume_info_23(&buffer, &info).unwrap();
         assert_eq!(volumes.len(), 1);
-        assert_eq!(volumes[0].device_path, "C");
+        assert_eq!(volumes[0].device_path, "C:");
         assert_eq!(volumes[0].serial_number, 0xDEAD_BEEF);
         assert_eq!(volumes[0].creation_time, 0x1000);
         assert!(volumes[0].file_references.is_empty());
@@ -280,7 +280,7 @@ mod tests {
         let (buffer, info) = single_entry_volume_buffer(104);
         let volumes = volume_info_26(&buffer, &info).unwrap();
         assert_eq!(volumes.len(), 1);
-        assert_eq!(volumes[0].device_path, "C");
+        assert_eq!(volumes[0].device_path, "C:");
     }
 
     #[test]
@@ -288,7 +288,7 @@ mod tests {
         let (buffer, info) = single_entry_volume_buffer(96);
         let volumes = volume_info_30(&buffer, &info).unwrap();
         assert_eq!(volumes.len(), 1);
-        assert_eq!(volumes[0].device_path, "C");
+        assert_eq!(volumes[0].device_path, "C:");
         assert_eq!(volumes[0].serial_number, 0xDEAD_BEEF);
     }
 
