@@ -1,44 +1,36 @@
-use std::panic::{catch_unwind, AssertUnwindSafe};
-
 use forensic_rs::err::{ForensicError, ForensicResult};
 use forensic_rs::utils::win::decompress::{lz77, lznt1, xpress_huff};
 
 pub use forensic_rs::utils::win::decompress::CompressionAlgorithm;
-
-/// Runs a `forensic_rs` decoder and converts a panic into a `ForensicResult` error.
-///
-/// Only for the LZ77 and Xpress-Huffman decoders: they index their input directly and aren't known
-/// to be panic-free on truncated or malformed data yet. LZNT1 is (forensic-rs's
-/// `lznt1::decompress_bounded` checks every read), so it runs unguarded. A single corrupted `.pf`
-/// file must not be able to abort an entire analysis run. `AssertUnwindSafe` is safe here: on panic, `out_buf` is discarded (the caller
-/// receives an `Err`, not the partially-written buffer), so an inconsistent partial write can't
-/// leak into further processing.
-fn run_decoder(decode: impl FnOnce() -> ForensicResult<()>) -> ForensicResult<()> {
-    catch_unwind(AssertUnwindSafe(decode)).unwrap_or_else(|_| {
-        Err(ForensicError::other(
-            "prefetch",
-            "The decompression algorithm panicked on malformed/truncated input".to_string(),
-        ))
-    })
-}
 
 /// Decompresses `in_buf` into `out_buf` using the given `algorithm`.
 ///
 /// # Errors
 ///
 /// Returns an error if `algorithm` is [`CompressionAlgorithm::CompressionFormatDefault`]
-/// (unsupported), or if the underlying decoder rejects `in_buf` as malformed/truncated —
-/// including a decoder panic on such input, which this function converts into an error rather
-/// than propagating (see [`run_decoder`]).
+/// (unsupported), or if the underlying decoder rejects `in_buf` as malformed/truncated.
+///
+/// Xpress-Huffman takes its output size from `out_buf`'s spare capacity, as it always has; the
+/// others decode until their input ends. For evidence, use [`decompress_bounded`] with the
+/// declared size.
 pub fn decompress(
     in_buf: &[u8],
     out_buf: &mut Vec<u8>,
     algorithm: CompressionAlgorithm,
 ) -> ForensicResult<()> {
-    decompress_bounded(in_buf, out_buf, algorithm, usize::MAX)
+    let max_out = match algorithm {
+        CompressionAlgorithm::CompressionFormatXpressHuff => {
+            out_buf.capacity().saturating_sub(out_buf.len())
+        }
+        _ => usize::MAX,
+    };
+    decompress_bounded(in_buf, out_buf, algorithm, max_out)
 }
 
-/// [`decompress`], producing at most `max_out` bytes: more is an error, not a truncated result.
+/// [`decompress`], producing at most `max_out` bytes.
+///
+/// LZNT1 marks its own end, so more output than `max_out` is an error. LZ77 and Xpress-Huffman
+/// don't: `max_out` is the size the MAM header declares, and their decoders stop there.
 pub fn decompress_bounded(
     in_buf: &[u8],
     out_buf: &mut Vec<u8>,
@@ -60,10 +52,10 @@ pub fn decompress_bounded(
             lznt1::decompress_bounded(in_buf, out_buf, max_out)?;
         }
         CompressionAlgorithm::CompressionFormatXpress => {
-            run_decoder(|| lz77::decompress(in_buf, out_buf))?;
+            lz77::decompress_bounded(in_buf, out_buf, max_out)?;
         }
         CompressionAlgorithm::CompressionFormatXpressHuff => {
-            run_decoder(|| xpress_huff::decompress(in_buf, out_buf))?;
+            xpress_huff::decompress_bounded(in_buf, out_buf, max_out)?;
         }
     }
     let produced = out_buf.len() - start;
@@ -200,14 +192,14 @@ mod tests {
 
     #[test]
     fn dispatches_xpress_huff_rejects_truncated_input_without_panicking() {
-        // Too short to hold the 256-byte Huffman code-length table. The decoder takes the
-        // expected output size from the capacity and reads nothing for a capacity of 0.
+        // Too short to hold a Huffman code-length table.
         let truncated = [0u8; 4];
-        let mut decoded_value = Vec::with_capacity(64);
-        let result = decompress(
+        let mut decoded_value = Vec::new();
+        let result = decompress_bounded(
             &truncated,
             &mut decoded_value,
             CompressionAlgorithm::CompressionFormatXpressHuff,
+            1024,
         );
         assert!(result.is_err());
     }

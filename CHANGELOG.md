@@ -36,8 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The path hash in the file name (`CMD.EXE-087B4001.pf`) was parsed as decimal, so almost every
   file "mismatched"; it is hexadecimal. Names containing `-` are split at the last one.
 - `read_prefetch_file_compressed` sliced its header without checking the length.
-- LZNT1 runs through forensic-rs's panic-free `decompress_bounded`, bounded by the declared size,
-  instead of behind `catch_unwind`; LZ77 and Xpress-Huffman keep the guard.
+- LZNT1, LZ77 and Xpress-Huffman all run through forensic-rs's panic-free `decompress_bounded`,
+  bounded by the declared size, and the `catch_unwind` guard is gone. Xpress-Huffman also reads
+  the 32-bit match length now; the decoder fixes come from the ys-prefetch-parser fork (Yamato
+  Security, MIT-era commit `7dd4b36`), ported to forensic-rs.
 - `read_prefetch_form_fs` stops at no file that can't be opened (it aborted the whole batch), and
   opens the `read_dir` entry path directly now that `ChRootFileSystem` returns its own namespace.
 
