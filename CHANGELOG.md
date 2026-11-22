@@ -61,8 +61,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Every loaded-file path (`Metric::file`) and volume device path came out half as long
   (`\DEVICE\HARDDISKVOLUME2\W`): the stored lengths are UTF-16 characters and were read as
   bytes since the 0.14 port. So `executable_path()` never found the executable (0 of 230 test
-  files; now 213) and `user()` never matched. Reads the lengths as characters, as the
-  ys-prefetch-parser fork's `8ac023a` does.
+  files; now 213) and `user()` never matched. Reads the lengths as characters (`bc6c1dc`; the
+  ys-prefetch-parser fork's `8ac023a` fixed the same).
 - A volume count larger than the volume block was trusted: `0xFFFFFFFF` reserved room for four
   billion entries (an abort) and walked them as zeroed entries. A directory-string count was
   reserved the same way. Both are now bounded by the data. A volume whose last directory string
