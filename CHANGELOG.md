@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `tests/reference_values.rs` checks 18 forensic-testenv prefetch files against
+  dissect.target 3.25.1: header, run times, every loaded file name and file reference, and
+  volumes. `tests/damaged_files.rs` checks that 17,000 damaged and crafted files neither panic
+  nor allocate beyond the size limit; it's ported from the ys-prefetch-parser fork's `1b5a5fb`,
+  over testenv samples, including 11 new artemis ones.
 - `scca_hash`: the prefetch path hash (`scca_xp_hash` for format 17, `scca_vista_hash` for 23
   and later, and `path_has_hash`, which also covers `\VOLUME{...}` paths). Written from libscca's
   format documentation and checked against the file names of the 230 test files: every
